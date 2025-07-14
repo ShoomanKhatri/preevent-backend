@@ -1,0 +1,24 @@
+services:
+  web:
+    build: . # Builds your Django app from Dockerfile
+    command: python manage.py runserver 0.0.0.0:8000
+    ports:
+      - "8000:8000" # Host:Container port mapping
+    volumes:
+      - .:/app # Sync local code with container
+    env_file:
+      - .env # Loads environment variables
+    depends_on:
+      - db # Waits for PostgreSQL container
+
+  db:
+    image: postgres:14
+    environment:
+      POSTGRES_DB: zefe_db
+      POSTGRES_USER: hyper_active
+      POSTGRES_PASSWORD: mypassword
+    volumes:
+      - postgres_data:/var/lib/postgresql/data
+
+volumes:
+  postgres_data:
