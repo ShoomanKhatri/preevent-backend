@@ -1,6 +1,14 @@
 from django.urls import path
 from rest_framework_simplejwt.views import TokenRefreshView
 from . import views
+from . import collaboration_views
+from .views import (
+    TestLoginView, MockWalletLoginView, 
+    CurrentUserView, OnboardingView, OnboardingUpdateView, AttendeesView,
+    SendConnectionRequestView, RespondToConnectionRequestView, MyConnectionRequestsView,
+    MyConnectionsView, ReportSpamView, ConnectionStatusView, NotificationsCountView,
+    NotificationsListView
+)
 
 urlpatterns = [
     # API Info
@@ -27,6 +35,35 @@ urlpatterns = [
     path('attendees/', views.AttendeesView.as_view(), name='attendees'),
     path('attendees/stats/', views.AttendeesStatsView.as_view(), name='attendees_stats'),
     path('attendees/<uuid:user_id>/', views.AttendeeDetailView.as_view(), name='attendee_detail'),
+    
+    # Connection system endpoints
+    path('connections/send-request/', SendConnectionRequestView.as_view(), name='send_connection_request'),
+    path('connections/respond/', RespondToConnectionRequestView.as_view(), name='respond_connection_request'),
+    path('connections/my-requests/', MyConnectionRequestsView.as_view(), name='my_connection_requests'),
+    path('connections/my-connections/', MyConnectionsView.as_view(), name='my_connections'),
+    path('connections/status/', ConnectionStatusView.as_view(), name='connection_status'),
+    path('report-spam/', ReportSpamView.as_view(), name='report_spam'),
+    
+    # Notification endpoints
+    path('notifications/count/', NotificationsCountView.as_view(), name='notifications_count'),
+    path('notifications/', NotificationsListView.as_view(), name='notifications_list'),
+    
+    # Collaboration System endpoints
+    path('collaborations/', views.CollaborationPostsView.as_view(), name='collaboration_posts'),
+    path('collaborations/<uuid:post_id>/', views.CollaborationPostDetailView.as_view(), name='collaboration_post_detail'),
+    path('collaborations/<uuid:post_id>/comments/', views.PostCommentsView.as_view(), name='post_comments'),
+    path('users/search/', views.UserSearchView.as_view(), name='user_search'),
+    path('collaborations/notifications/', views.CollaborationNotificationsView.as_view(), name='collaboration_notifications'),
+    path('message-button/', views.MessageButtonView.as_view(), name='message_button'),
+    path('notifications/<uuid:notification_id>/read/', views.MarkNotificationReadView.as_view(), name='mark_notification_read'),
+    path('notifications/mark-all-read/', views.MarkAllNotificationsReadView.as_view(), name='mark_all_notifications_read'),
+    
+    # Collaboration System endpoints
+    path('collaboration/posts/', views.CollaborationPostsView.as_view(), name='collaboration_posts'),
+    path('collaboration/posts/<uuid:post_id>/', views.CollaborationPostDetailView.as_view(), name='collaboration_post_detail'),
+    path('collaboration/posts/<uuid:post_id>/comments/', views.PostCommentsView.as_view(), name='post_comments'),
+    path('collaboration/user-search/', views.UserSearchView.as_view(), name='collaboration_user_search'),
+    path('collaboration/notifications/', views.CollaborationNotificationsView.as_view(), name='collaboration_notifications_detailed'),
     
     # Onboarding endpoints
     path('onboarding/', views.OnboardingView.as_view(), name='onboarding'),                    # GET, POST

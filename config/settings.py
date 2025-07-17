@@ -208,10 +208,10 @@ REST_FRAMEWORK = {
 
 # JWT Configuration optimized for mobile
 SIMPLE_JWT = {
-    'ACCESS_TOKEN_LIFETIME': timedelta(minutes=15),  # Shorter for security
+    'ACCESS_TOKEN_LIFETIME': timedelta(minutes=14400),  # Shorter for security
     'REFRESH_TOKEN_LIFETIME': timedelta(days=30),   # Longer for mobile UX
-    'ROTATE_REFRESH_TOKENS': True,
-    'BLACKLIST_AFTER_ROTATION': True,
+    'ROTATE_REFRESH_TOKENS': False,
+    'BLACKLIST_AFTER_ROTATION': False,
     'UPDATE_LAST_LOGIN': False,
 
     'ALGORITHM': 'HS256',

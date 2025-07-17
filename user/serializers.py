@@ -1,7 +1,12 @@
 from rest_framework import serializers
 from django.contrib.auth import authenticate
 from django.db import IntegrityError
-from .models import User, UserProfile, Vertical, ChainEcosystem
+from django.db import models
+from django.utils import timezone
+from .models import (
+    User, UserProfile, Vertical, ChainEcosystem, ConnectionRequest, Connection, 
+    SpamReport, UserSpamScore, CollaborationPost, Comment, Notification
+)
 
 class UserSerializer(serializers.ModelSerializer):
     class Meta:
@@ -168,46 +173,328 @@ class OnboardingSerializer(serializers.ModelSerializer):
         
         return instance
 
-class WalletLoginSerializer(serializers.Serializer):
-    wallet_address = serializers.CharField(max_length=100)
-    signature = serializers.CharField(max_length=500)
-    message = serializers.CharField(max_length=500)
-    
-    def validate(self, attrs):
-        wallet_address = attrs.get('wallet_address')
-        signature = attrs.get('signature')
-        message = attrs.get('message')
-        
-        if not all([wallet_address, signature, message]):
-            raise serializers.ValidationError("All fields are required")
-        
-        return attrs
-
-class MockWalletLoginSerializer(serializers.Serializer):
-    """Mock wallet login serializer for testing without signature verification"""
-    wallet_address = serializers.CharField(max_length=100)
-    wallet_type = serializers.CharField(max_length=20, default='solana')
-    
-    def validate_wallet_address(self, value):
-        if len(value) < 10:
-            raise serializers.ValidationError("Wallet address must be at least 10 characters")
-        return value
-    
-    def validate_wallet_type(self, value):
-        allowed_types = ['solana', 'ethereum', 'bitcoin', 'phantom', 'metamask']
-        if value.lower() not in allowed_types:
-            raise serializers.ValidationError(f"Wallet type must be one of: {', '.join(allowed_types)}")
-        return value.lower()
-
 class TestLoginSerializer(serializers.Serializer):
     username = serializers.CharField()
     password = serializers.CharField()
 
+class MockWalletLoginSerializer(serializers.Serializer):
+    wallet_address = serializers.CharField(max_length=100)
+    username = serializers.CharField(max_length=150, required=False)
+    email = serializers.EmailField(required=False)
+    first_name = serializers.CharField(max_length=30, required=False)
+    last_name = serializers.CharField(max_length=30, required=False)
+
 class NonceRequestSerializer(serializers.Serializer):
     wallet_address = serializers.CharField(max_length=100)
-    wallet_type = serializers.CharField(max_length=20, default='solana')
+
+class WalletLoginSerializer(serializers.Serializer):
+    wallet_address = serializers.CharField(max_length=100)
+    signature = serializers.CharField()
+    nonce = serializers.CharField()
+    username = serializers.CharField(max_length=150, required=False)
+    email = serializers.EmailField(required=False)
+    first_name = serializers.CharField(max_length=30, required=False)
+    last_name = serializers.CharField(max_length=30, required=False)
+
+class AttendeesSerializer(serializers.ModelSerializer):
+    """Serializer for attendees list with profile information"""
+    profile = UserProfileSerializer(read_only=True)
     
-    def validate_wallet_address(self, value):
-        if len(value) < 10:
-            raise serializers.ValidationError("Wallet address must be at least 10 characters")
+    class Meta:
+        model = User
+        fields = ['id', 'username', 'wallet_address', 'first_name', 'last_name', 'profile']
+        read_only_fields = ['id', 'username', 'wallet_address', 'first_name', 'last_name']
+
+# Connection System Serializers
+class UserWithProfileSerializer(serializers.ModelSerializer):
+    """Enhanced user serializer with profile information for connections"""
+    profile = UserProfileSerializer(read_only=True)
+    
+    class Meta:
+        model = User
+        fields = ['id', 'username', 'wallet_address', 'email', 'first_name', 'last_name', 'is_onboarded', 'profile']
+        read_only_fields = ['id']
+
+class ConnectionRequestSerializer(serializers.ModelSerializer):
+    sender = UserWithProfileSerializer(read_only=True)
+    receiver = UserWithProfileSerializer(read_only=True)
+    
+    class Meta:
+        model = ConnectionRequest
+        fields = ['id', 'sender', 'receiver', 'note_content', 'status', 'created_at', 'updated_at']
+        read_only_fields = ['created_at', 'updated_at']
+
+class ConnectionSerializer(serializers.ModelSerializer):
+    user1 = UserWithProfileSerializer(read_only=True)
+    user2 = UserWithProfileSerializer(read_only=True)
+    connection_request = ConnectionRequestSerializer(read_only=True)
+    
+    class Meta:
+        model = Connection
+        fields = ['id', 'user1', 'user2', 'connection_request', 'created_at']
+        read_only_fields = ['created_at']
+        read_only_fields = ['created_at']
+
+class SpamReportSerializer(serializers.ModelSerializer):
+    reported_by = UserSerializer(read_only=True)
+    reported_user = UserSerializer(read_only=True)
+    
+    class Meta:
+        model = SpamReport
+        fields = ['id', 'reported_by', 'reported_user', 'reason', 'created_at']
+        read_only_fields = ['created_at']
+
+class SendConnectionRequestSerializer(serializers.Serializer):
+    receiver_id = serializers.UUIDField()
+    note_content = serializers.CharField(max_length=500, required=False, allow_blank=True)
+    
+    def validate_receiver_id(self, value):
+        try:
+            User.objects.get(id=value)
+        except User.DoesNotExist:
+            raise serializers.ValidationError("Receiver user does not exist")
         return value
+
+class RespondToConnectionRequestSerializer(serializers.Serializer):
+    request_id = serializers.UUIDField()
+    response = serializers.ChoiceField(choices=['interested', 'not_interested', 'spam'])
+    
+    def validate_request_id(self, value):
+        try:
+            ConnectionRequest.objects.get(id=value)
+        except ConnectionRequest.DoesNotExist:
+            raise serializers.ValidationError("Connection request does not exist")
+        return value
+
+class ReportSpamSerializer(serializers.Serializer):
+    reported_user_id = serializers.UUIDField()
+    reason = serializers.CharField(max_length=500, required=False, allow_blank=True)
+    
+    def validate_reported_user_id(self, value):
+        try:
+            User.objects.get(id=value)
+        except User.DoesNotExist:
+            raise serializers.ValidationError("Reported user does not exist")
+        return value
+
+# Collaboration System Serializers
+class CollaborationPostSerializer(serializers.ModelSerializer):
+    """Serializer for reading collaboration posts"""
+    creator = UserSerializer(read_only=True)
+    creator_profile = serializers.SerializerMethodField()
+    comments_count = serializers.SerializerMethodField()
+    is_creator = serializers.SerializerMethodField()
+    brief_preview = serializers.SerializerMethodField()
+    tags_list = serializers.SerializerMethodField()
+    
+    class Meta:
+        model = CollaborationPost
+        fields = [
+            'id', 'title', 'brief', 'brief_preview', 'due_date', 'tags', 'tags_list', 
+            'link', 'creator', 'creator_profile', 'comments_count', 'is_creator', 
+            'created_at', 'updated_at'
+        ]
+    
+    def get_creator_profile(self, obj):
+        """Get creator profile information"""
+        try:
+            profile = obj.creator.profile
+            return {
+                'full_name': profile.full_name,
+                'avatar_url': profile.avatar_url,
+                'position': profile.position,
+                'city': profile.city
+            }
+        except:
+            return None
+    
+    def get_comments_count(self, obj):
+        """Get total comments count"""
+        return obj.comments.count()
+    
+    def get_is_creator(self, obj):
+        """Check if current user is the creator"""
+        request = self.context.get('request')
+        if request and request.user.is_authenticated:
+            return obj.creator == request.user
+        return False
+    
+    def get_brief_preview(self, obj):
+        """Get first 7 words of brief + 'more' if longer"""
+        if not obj.brief:
+            return ''
+        
+        words = obj.brief.split()
+        if len(words) <= 7:
+            return obj.brief
+        
+        preview = ' '.join(words[:7])
+        return f"{preview}... more"
+    
+    def get_tags_list(self, obj):
+        """Return tags as list"""
+        if not obj.tags:
+            return []
+        # Tags are stored as JSONField (list), so return as-is
+        if isinstance(obj.tags, list):
+            return obj.tags
+        # Fallback for string format (comma-separated)
+        elif isinstance(obj.tags, str):
+            return [tag.strip() for tag in obj.tags.split(',') if tag.strip()]
+        return []
+
+class CreateCollaborationPostSerializer(serializers.ModelSerializer):
+    """Serializer for creating/updating collaboration posts"""
+    
+    class Meta:
+        model = CollaborationPost
+        fields = ['title', 'brief', 'due_date', 'tags', 'link']
+    
+    def validate_title(self, value):
+        """Validate title"""
+        if len(value.strip()) < 5:
+            raise serializers.ValidationError("Title must be at least 5 characters long")
+        return value.strip()
+    
+    def validate_brief(self, value):
+        """Validate brief"""
+        if len(value.strip()) < 10:
+            raise serializers.ValidationError("Brief must be at least 10 characters long")
+        return value.strip()
+    
+    def validate_due_date(self, value):
+        """Validate due date is in the future"""
+        # Convert both to datetime for comparison
+        now = timezone.now()
+        
+        # If value is a date object, convert to datetime at end of day
+        if hasattr(value, 'date') and not hasattr(value, 'hour'):
+            # It's a date object, convert to datetime at end of day
+            from datetime import datetime, time
+            value = timezone.make_aware(datetime.combine(value, time.max))
+        elif not hasattr(value, 'hour'):
+            # Handle string dates or other formats
+            from datetime import datetime, time
+            if isinstance(value, str):
+                # Parse string date
+                try:
+                    from datetime import datetime
+                    parsed_date = datetime.strptime(value, '%Y-%m-%d').date()
+                    value = timezone.make_aware(datetime.combine(parsed_date, time.max))
+                except ValueError:
+                    raise serializers.ValidationError("Invalid date format. Use YYYY-MM-DD")
+        
+        # Now compare datetime objects
+        if value <= now:
+            raise serializers.ValidationError("Due date must be in the future")
+        
+        return value
+    
+    def validate_tags(self, value):
+        """Validate and clean tags"""
+        if not value:
+            return []
+        
+        # Handle both string and list inputs
+        if isinstance(value, str):
+            # Split comma-separated string into list
+            tags = [tag.strip() for tag in value.split(',') if tag.strip()]
+        elif isinstance(value, list):
+            # Clean list of tags
+            tags = [str(tag).strip() for tag in value if str(tag).strip()]
+        else:
+            tags = []
+        
+        if len(tags) > 10:
+            raise serializers.ValidationError("Maximum 10 tags allowed")
+        
+        for tag in tags:
+            if len(tag) > 30:
+                raise serializers.ValidationError("Each tag must be less than 30 characters")
+        
+        return tags
+
+class CommentSerializer(serializers.ModelSerializer):
+    """Serializer for reading comments"""
+    commenter = UserSerializer(read_only=True)
+    commenter_profile = serializers.SerializerMethodField()
+    is_commenter = serializers.SerializerMethodField()
+    mentions = serializers.SerializerMethodField()
+    
+    class Meta:
+        model = Comment
+        fields = [
+            'id', 'content', 'commenter', 'commenter_profile', 'is_commenter', 
+            'mentions', 'created_at', 'updated_at'
+        ]
+    
+    def get_commenter_profile(self, obj):
+        """Get commenter profile information"""
+        try:
+            profile = obj.commenter.profile
+            return {
+                'full_name': profile.full_name,
+                'avatar_url': profile.avatar_url,
+                'position': profile.position
+            }
+        except:
+            return None
+    
+    def get_is_commenter(self, obj):
+        """Check if current user is the commenter"""
+        request = self.context.get('request')
+        if request and request.user.is_authenticated:
+            return obj.commenter == request.user
+        return False
+    
+    def get_mentions(self, obj):
+        """Extract @username mentions from content"""
+        import re
+        mention_pattern = r'@(\w+)'
+        mentions = re.findall(mention_pattern, obj.content)
+        return mentions
+
+class CreateCommentSerializer(serializers.ModelSerializer):
+    """Serializer for creating comments"""
+    
+    class Meta:
+        model = Comment
+        fields = ['content']
+    
+    def validate_content(self, value):
+        """Validate comment content"""
+        if len(value.strip()) < 1:
+            raise serializers.ValidationError("Comment cannot be empty")
+        if len(value) > 1000:
+            raise serializers.ValidationError("Comment must be less than 1000 characters")
+        return value.strip()
+
+class NotificationSerializer(serializers.ModelSerializer):
+    """Serializer for notifications"""
+    
+    class Meta:
+        model = Notification
+        fields = [
+            'id', 'type', 'title', 'message', 'is_read', 
+            'related_object_id', 'related_object_type', 
+            'created_at'
+        ]
+
+class UserSearchSerializer(serializers.ModelSerializer):
+    """Serializer for user search/autocomplete"""
+    profile = serializers.SerializerMethodField()
+    
+    class Meta:
+        model = User
+        fields = ['id', 'username', 'profile']
+    
+    def get_profile(self, obj):
+        """Get basic profile info for search results"""
+        try:
+            profile = obj.profile
+            return {
+                'full_name': profile.full_name,
+                'avatar_url': profile.avatar_url
+            }
+        except:
+            return None
