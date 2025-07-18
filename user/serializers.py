@@ -3,6 +3,7 @@ from django.contrib.auth import authenticate
 from django.db import IntegrityError
 from django.db import models
 from django.utils import timezone
+import re
 from .models import (
     User, UserProfile, Vertical, ChainEcosystem, ConnectionRequest, Connection, 
     SpamReport, UserSpamScore, CollaborationPost, Comment, Notification
@@ -420,12 +421,18 @@ class CommentSerializer(serializers.ModelSerializer):
     commenter_profile = serializers.SerializerMethodField()
     is_commenter = serializers.SerializerMethodField()
     mentions = serializers.SerializerMethodField()
+    mentioned_users_details = serializers.SerializerMethodField()
+    replies = serializers.SerializerMethodField()
+    reply_count = serializers.SerializerMethodField()
+    is_reply = serializers.SerializerMethodField()
+    parent_comment_info = serializers.SerializerMethodField()
     
     class Meta:
         model = Comment
         fields = [
             'id', 'content', 'commenter', 'commenter_profile', 'is_commenter', 
-            'mentions', 'created_at', 'updated_at'
+            'mentions', 'mentioned_users_details', 'replies', 'reply_count',
+            'is_reply', 'parent_comment_info', 'created_at', 'updated_at'
         ]
     
     def get_commenter_profile(self, obj):
@@ -453,13 +460,102 @@ class CommentSerializer(serializers.ModelSerializer):
         mention_pattern = r'@(\w+)'
         mentions = re.findall(mention_pattern, obj.content)
         return mentions
+    
+    def get_mentioned_users_details(self, obj):
+        """Get details of mentioned users"""
+        mentioned_users = obj.mentioned_users.all()
+        result = []
+        for user in mentioned_users:
+            try:
+                profile = user.profile
+                result.append({
+                    'id': str(user.id),
+                    'username': user.username,
+                    'display_name': profile.full_name if profile.full_name else user.username,
+                    'avatar_url': profile.avatar_url
+                })
+            except:
+                result.append({
+                    'id': str(user.id),
+                    'username': user.username,
+                    'display_name': user.username,
+                    'avatar_url': ''
+                })
+        return result
+
+    def get_replies(self, obj):
+        """Get replies to this comment (only direct replies, not nested)"""
+        if obj.is_reply:
+            return []  # Replies don't have their own replies to keep it simple
+        
+        replies = obj.replies.all().order_by('created_at')
+        # Use a simplified serializer to avoid infinite recursion
+        result = []
+        for reply in replies:
+            try:
+                profile = reply.commenter.profile
+                commenter_info = {
+                    'full_name': profile.full_name,
+                    'avatar_url': profile.avatar_url,
+                    'position': profile.position
+                }
+            except:
+                commenter_info = None
+            
+            result.append({
+                'id': str(reply.id),
+                'content': reply.content,
+                'commenter': {
+                    'id': str(reply.commenter.id),
+                    'username': reply.commenter.username
+                },
+                'commenter_profile': commenter_info,
+                'is_commenter': reply.commenter == self.context.get('request').user if self.context.get('request') else False,
+                'created_at': reply.created_at,
+                'updated_at': reply.updated_at
+            })
+        return result
+    
+    def get_reply_count(self, obj):
+        """Get total number of replies"""
+        return obj.replies.count()
+    
+    def get_is_reply(self, obj):
+        """Check if this comment is a reply"""
+        return obj.parent_comment is not None
+    
+    def get_parent_comment_info(self, obj):
+        """Get parent comment info if this is a reply"""
+        if not obj.parent_comment:
+            return None
+        
+        try:
+            profile = obj.parent_comment.commenter.profile
+            commenter_info = {
+                'full_name': profile.full_name,
+                'avatar_url': profile.avatar_url,
+                'position': profile.position
+            }
+        except:
+            commenter_info = None
+        
+        return {
+            'id': str(obj.parent_comment.id),
+            'commenter': {
+                'id': str(obj.parent_comment.commenter.id),
+                'username': obj.parent_comment.commenter.username
+            },
+            'commenter_profile': commenter_info,
+            'content_preview': obj.parent_comment.content[:50] + '...' if len(obj.parent_comment.content) > 50 else obj.parent_comment.content
+        }
 
 class CreateCommentSerializer(serializers.ModelSerializer):
-    """Serializer for creating comments"""
+    """Serializer for creating comments and replies"""
+    parent_comment_id = serializers.UUIDField(required=False, allow_null=True)
     
     class Meta:
         model = Comment
-        fields = ['content']
+        fields = ['content', 'parent_comment_id']
     
     def validate_content(self, value):
         """Validate comment content"""
@@ -468,6 +564,29 @@ class CreateCommentSerializer(serializers.ModelSerializer):
         if len(value) > 1000:
             raise serializers.ValidationError("Comment must be less than 1000 characters")
         return value.strip()
+    
+    def validate_parent_comment_id(self, value):
+        """Validate parent comment exists and belongs to the same post"""
+        if value is None:
+            return None
+        
+        try:
+            parent_comment = Comment.objects.get(id=value)
+            # Ensure we can't reply to a reply (only 1 level deep)
+            if parent_comment.parent_comment is not None:
+                raise serializers.ValidationError("Cannot reply to a reply. Only one level of replies is allowed.")
+            return parent_comment
+        except Comment.DoesNotExist:
+            raise serializers.ValidationError("Parent comment does not exist")
+    
+    def create(self, validated_data):
+        """Create comment or reply"""
+        parent_comment = validated_data.pop('parent_comment_id', None)
+        comment = Comment.objects.create(
+            parent_comment=parent_comment,
+            **validated_data
+        )
+        return comment
 
 class NotificationSerializer(serializers.ModelSerializer):
     """Serializer for notifications"""
@@ -481,20 +600,43 @@ class NotificationSerializer(serializers.ModelSerializer):
         ]
 
 class UserSearchSerializer(serializers.ModelSerializer):
-    """Serializer for user search/autocomplete"""
-    profile = serializers.SerializerMethodField()
+    """Serializer for user search/autocomplete for mentions"""
+    display_name = serializers.SerializerMethodField()
+    mention_text = serializers.SerializerMethodField()
+    profile_info = serializers.SerializerMethodField()
     
     class Meta:
         model = User
-        fields = ['id', 'username', 'profile']
+        fields = ['id', 'username', 'display_name', 'mention_text', 'profile_info']
     
-    def get_profile(self, obj):
-        """Get basic profile info for search results"""
+    def get_display_name(self, obj):
+        """Get the display name (full_name or username)"""
+        try:
+            profile = obj.profile
+            return profile.full_name if profile.full_name else obj.username
+        except:
+            return obj.username
+    
+    def get_mention_text(self, obj):
+        """Get the text to insert when user is mentioned (@username)"""
+        return f"@{obj.username}"
+    
+    def get_profile_info(self, obj):
+        """Get additional profile info for display"""
         try:
             profile = obj.profile
             return {
                 'full_name': profile.full_name,
-                'avatar_url': profile.avatar_url
+                'avatar_url': profile.avatar_url,
+                'position': profile.position,
+                'city': profile.city,
+                'telegram_username': profile.telegram_username
             }
         except:
-            return None
+            return {
+                'full_name': '',
+                'avatar_url': '',
+                'position': '',
+                'city': '',
+                'telegram_username': ''
+            }

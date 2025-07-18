@@ -3,11 +3,18 @@ from rest_framework_simplejwt.views import TokenRefreshView
 from . import views
 from . import collaboration_views
 from .views import (
-    TestLoginView, MockWalletLoginView, 
-    CurrentUserView, OnboardingView, OnboardingUpdateView, AttendeesView,
+    TestLoginView, MockWalletLoginView, ProtectedTestView,
+    CurrentUserView, OnboardingView, OnboardingUpdateView, OnboardingOptionsView, AttendeesView,
+    AttendeeDetailView, AttendeesStatsView,
     SendConnectionRequestView, RespondToConnectionRequestView, MyConnectionRequestsView,
     MyConnectionsView, ReportSpamView, ConnectionStatusView, NotificationsCountView,
-    NotificationsListView
+    NotificationsListView, MarkNotificationReadView, MarkAllNotificationsReadView,
+    CollaborationPostsView, CollaborationPostDetailView, PostCommentsView,
+    CommentRepliesView, CommentThreadView, CommentDetailView, TopLevelCommentsView,
+    UserCommentsView, ProfileView
+)
+from .collaboration_views import (
+    UserSearchView, CollaborationNotificationsView, MessageButtonView
 )
 
 urlpatterns = [
@@ -52,18 +59,26 @@ urlpatterns = [
     path('collaborations/', views.CollaborationPostsView.as_view(), name='collaboration_posts'),
     path('collaborations/<uuid:post_id>/', views.CollaborationPostDetailView.as_view(), name='collaboration_post_detail'),
     path('collaborations/<uuid:post_id>/comments/', views.PostCommentsView.as_view(), name='post_comments'),
-    path('users/search/', views.UserSearchView.as_view(), name='user_search'),
-    path('collaborations/notifications/', views.CollaborationNotificationsView.as_view(), name='collaboration_notifications'),
-    path('message-button/', views.MessageButtonView.as_view(), name='message_button'),
+    path('users/search/', UserSearchView.as_view(), name='user_search'),
+    path('collaborations/notifications/', CollaborationNotificationsView.as_view(), name='collaboration_notifications'),
+    path('message-button/', MessageButtonView.as_view(), name='message_button'),
     path('notifications/<uuid:notification_id>/read/', views.MarkNotificationReadView.as_view(), name='mark_notification_read'),
     path('notifications/mark-all-read/', views.MarkAllNotificationsReadView.as_view(), name='mark_all_notifications_read'),
+    
+    # Reply System Specific APIs
+    path('comments/<uuid:comment_id>/replies/', views.CommentRepliesView.as_view(), name='comment_replies'),
+    path('comments/<uuid:comment_id>/thread/', views.CommentThreadView.as_view(), name='comment_thread'),
+    path('comments/<uuid:comment_id>/detail/', views.CommentDetailView.as_view(), name='comment_detail'),
+    path('collaborations/<uuid:post_id>/top-comments/', views.TopLevelCommentsView.as_view(), name='top_level_comments'),
+    path('users/<uuid:user_id>/comments/', views.UserCommentsView.as_view(), name='user_comments'),
+    path('my-comments/', views.UserCommentsView.as_view(), name='my_comments'),
     
     # Collaboration System endpoints
     path('collaboration/posts/', views.CollaborationPostsView.as_view(), name='collaboration_posts'),
     path('collaboration/posts/<uuid:post_id>/', views.CollaborationPostDetailView.as_view(), name='collaboration_post_detail'),
     path('collaboration/posts/<uuid:post_id>/comments/', views.PostCommentsView.as_view(), name='post_comments'),
-    path('collaboration/user-search/', views.UserSearchView.as_view(), name='collaboration_user_search'),
-    path('collaboration/notifications/', views.CollaborationNotificationsView.as_view(), name='collaboration_notifications_detailed'),
+    path('collaboration/user-search/', UserSearchView.as_view(), name='collaboration_user_search'),
+    path('collaboration/notifications/', CollaborationNotificationsView.as_view(), name='collaboration_notifications_detailed'),
     
     # Onboarding endpoints
     path('onboarding/', views.OnboardingView.as_view(), name='onboarding'),                    # GET, POST

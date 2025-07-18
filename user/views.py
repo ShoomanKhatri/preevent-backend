@@ -1198,6 +1198,16 @@ class SendConnectionRequestView(APIView):
                     note_content=serializer.validated_data.get('note_content', '')
                 )
                 
+                # Create notification for the receiver
+                Notification.objects.create(
+                    user=receiver,
+                    type='CONNECTION_REQUEST',
+                    title='New connection request',
+                    message=f'{sender.username} sent you a connection request',
+                    related_connection_request=connection_request,
+                    related_user=sender
+                )
+                
                 serializer = ConnectionRequestSerializer(connection_request)
                 return Response(serializer.data, status=status.HTTP_201_CREATED)
                 
@@ -1256,6 +1266,16 @@ class RespondToConnectionRequestView(APIView):
                     )
                     connection_request.status = 'ACCEPTED'
                     connection_request.save()
+                    
+                    # Create notification for the sender that their request was accepted
+                    Notification.objects.create(
+                        user=connection_request.sender,
+                        type='CONNECTION_ACCEPTED',
+                        title='Connection request accepted',
+                        message=f'{connection_request.receiver.username} accepted your connection request',
+                        related_connection_request=connection_request,
+                        related_user=connection_request.receiver
+                    )
                     
                     return Response(
                         {'message': 'Connection request accepted'},
@@ -1952,7 +1972,7 @@ class PostCommentsView(APIView):
     permission_classes = [IsAuthenticated]
     
     def get(self, request, post_id):
-        """Get all comments for a post"""
+        """Get all top-level comments for a post (replies are included in comments)"""
         try:
             post = CollaborationPost.objects.get(id=post_id, is_active=True)
         except CollaborationPost.DoesNotExist:
@@ -1960,18 +1980,23 @@ class PostCommentsView(APIView):
                 'error': 'Post not found'
             }, status=status.HTTP_404_NOT_FOUND)
         
-        comments = Comment.objects.filter(post=post).select_related(
+        # Get only top-level comments (parent_comment is None)
+        comments = Comment.objects.filter(
+            post=post, 
+            parent_comment=None
+        ).select_related(
             'commenter', 'commenter__profile'
-        ).prefetch_related('mentioned_users')
+        ).prefetch_related('mentioned_users', 'replies__commenter__profile')
         
         serializer = CommentSerializer(comments, many=True, context={'request': request})
         return Response({
             'comments': serializer.data,
-            'total_comments': comments.count()
+            'total_comments': Comment.objects.filter(post=post).count(),  # Total including replies
+            'top_level_comments': comments.count()
         })
     
     def post(self, request, post_id):
-        """Add a comment to a post"""
+        """Add a comment or reply to a post"""
         try:
             post = CollaborationPost.objects.get(id=post_id, is_active=True)
         except CollaborationPost.DoesNotExist:
@@ -1982,68 +2007,202 @@ class PostCommentsView(APIView):
         serializer = CreateCommentSerializer(data=request.data)
         
         if serializer.is_valid():
+            # Validate parent comment belongs to the same post
+            parent_comment = serializer.validated_data.get('parent_comment_id')
+            if parent_comment and parent_comment.post != post:
+                return Response({
+                    'error': 'Parent comment does not belong to this post'
+                }, status=status.HTTP_400_BAD_REQUEST)
+            
             comment = serializer.save(
                 post=post,
                 commenter=request.user
             )
             
-            # Create notification for post creator (if not commenting on own post)
-            if post.creator != request.user:
-                Notification.objects.create(
-                    user=post.creator,
-                    type='POST_COMMENT',
-                    title=f'New comment on your post',
-                    message=f'{request.user.username} commented on "{post.title}"',
-                    related_post=post,
-                    related_comment=comment,
-                    related_user=request.user
-                )
+            # Create notification logic
+            if comment.parent_comment:
+                # This is a reply - notification is handled in the model save method
+                pass
+            else:
+                # This is a top-level comment - notify post creator
+                if post.creator != request.user:
+                    Notification.objects.create(
+                        user=post.creator,
+                        type='POST_COMMENT',
+                        title=f'{request.user.username} commented on your post',
+                        message=f'{request.user.username} commented on "{post.title}"',
+                        related_post=post,
+                        related_comment=comment,
+                        related_user=request.user
+                    )
             
             response_serializer = CommentSerializer(comment, context={'request': request})
             return Response(response_serializer.data, status=status.HTTP_201_CREATED)
         
         return Response(serializer.errors, status=status.HTTP_400_BAD_REQUEST)
 
-class UserSearchView(APIView):
-    """Search users for mentions/tagging"""
+# ================================
+# REPLY SYSTEM SPECIFIC APIS  
+# ================================
+
+class CommentRepliesView(APIView):
+    """Get all replies for a specific comment"""
     permission_classes = [IsAuthenticated]
     
-    def get(self, request):
-        """Search users by username or name for autocomplete"""
-        query = request.query_params.get('q', '').strip()
-        
-        if len(query) < 2:
+    def get(self, request, comment_id):
+        """Get all replies for a specific comment"""
+        try:
+            # Get the parent comment
+            parent_comment = Comment.objects.get(id=comment_id)
+        except Comment.DoesNotExist:
             return Response({
-                'users': [],
-                'message': 'Query must be at least 2 characters'
-            })
+                'error': 'Comment not found'
+            }, status=status.HTTP_404_NOT_FOUND)
         
-        # Search by username and profile full_name
-        users = User.objects.filter(
-            Q(username__icontains=query) |
-            Q(profile__full_name__icontains=query),
-            is_active=True,
-            is_onboarded=True
-        ).exclude(
-            id=request.user.id  # Exclude current user
-        ).select_related('profile')[:10]  # Limit to 10 results
+        # Get all replies to this comment
+        replies = Comment.objects.filter(
+            parent_comment=parent_comment
+        ).select_related(
+            'commenter', 'commenter__profile'
+        ).prefetch_related('mentioned_users').order_by('created_at')
         
-        serializer = UserSearchSerializer(users, many=True)
+        # Pagination for replies
+        page = int(request.query_params.get('page', 1))
+        page_size = int(request.query_params.get('page_size', 10))
+        start_index = (page - 1) * page_size
+        end_index = start_index + page_size
+        
+        total_replies = replies.count()
+        paginated_replies = replies[start_index:end_index]
+        
+        serializer = CommentSerializer(paginated_replies, many=True, context={'request': request})
+        
         return Response({
-            'users': serializer.data
+            'parent_comment': {
+                'id': str(parent_comment.id),
+                'content': parent_comment.content,
+                'commenter': parent_comment.commenter.username,
+                'created_at': parent_comment.created_at
+            },
+            'replies': serializer.data,
+            'pagination': {
+                'page': page,
+                'page_size': page_size,
+                'total_pages': (total_replies + page_size - 1) // page_size,
+                'total_replies': total_replies,
+                'has_next': end_index < total_replies,
+                'has_previous': page > 1
+            }
         })
 
-class CollaborationNotificationsView(APIView):
-    """Handle collaboration notifications"""
+class TopLevelCommentsView(APIView):
+    """Get only top-level comments (no replies) for a post"""
     permission_classes = [IsAuthenticated]
     
-    def get(self, request):
-        """Get user notifications"""
-        notifications = Notification.objects.filter(
-            user=request.user
+    def get(self, request, post_id):
+        """Get only top-level comments for a post"""
+        try:
+            post = CollaborationPost.objects.get(id=post_id, is_active=True)
+        except CollaborationPost.DoesNotExist:
+            return Response({
+                'error': 'Post not found'
+            }, status=status.HTTP_404_NOT_FOUND)
+        
+        # Get only top-level comments (no parent_comment)
+        comments = Comment.objects.filter(
+            post=post,
+            parent_comment=None  # Only top-level comments
         ).select_related(
-            'related_user', 'related_post', 'related_comment'
-        ).order_by('-created_at')
+            'commenter', 'commenter__profile'
+        ).prefetch_related('mentioned_users').order_by('created_at')
+        
+        # Pagination
+        page = int(request.query_params.get('page', 1))
+        page_size = int(request.query_params.get('page_size', 10))
+        start_index = (page - 1) * page_size
+        end_index = start_index + page_size
+        
+        total_comments = comments.count()
+        paginated_comments = comments[start_index:end_index]
+        
+        serializer = CommentSerializer(paginated_comments, many=True, context={'request': request})
+        
+        return Response({
+            'comments': serializer.data,
+            'pagination': {
+                'page': page,
+                'page_size': page_size,
+                'total_pages': (total_comments + page_size - 1) // page_size,
+                'total_comments': total_comments,
+                'total_replies': Comment.objects.filter(post=post, parent_comment__isnull=False).count(),
+                'has_next': end_index < total_comments,
+                'has_previous': page > 1
+            }
+        })
+
+class CommentThreadView(APIView):
+    """Get a complete comment thread (comment + all its replies)"""
+    permission_classes = [IsAuthenticated]
+    
+    def get(self, request, comment_id):
+        """Get a comment and all its replies in a threaded format"""
+        try:
+            # Get the main comment (must be top-level)
+            main_comment = Comment.objects.get(id=comment_id, parent_comment=None)
+        except Comment.DoesNotExist:
+            return Response({
+                'error': 'Top-level comment not found'
+            }, status=status.HTTP_404_NOT_FOUND)
+        
+        # Get all replies
+        replies = Comment.objects.filter(
+            parent_comment=main_comment
+        ).select_related(
+            'commenter', 'commenter__profile'
+        ).prefetch_related('mentioned_users').order_by('created_at')
+        
+        # Serialize main comment and replies
+        main_comment_serializer = CommentSerializer(main_comment, context={'request': request})
+        replies_serializer = CommentSerializer(replies, many=True, context={'request': request})
+        
+        return Response({
+            'thread': {
+                'main_comment': main_comment_serializer.data,
+                'replies': replies_serializer.data,
+                'total_replies': replies.count(),
+                'last_reply_at': replies.last().created_at if replies.exists() else None
+            }
+        })
+
+class UserCommentsView(APIView):
+    """Get all comments and replies by a specific user"""
+    permission_classes = [IsAuthenticated]
+    
+    def get(self, request, user_id=None):
+        """Get all comments by user (defaults to current user)"""
+        if user_id:
+            try:
+                target_user = User.objects.get(id=user_id)
+            except User.DoesNotExist:
+                return Response({
+                    'error': 'User not found'
+                }, status=status.HTTP_404_NOT_FOUND)
+        else:
+            target_user = request.user
+        
+        # Get all comments by user
+        comments = Comment.objects.filter(
+            commenter=target_user
+        ).select_related(
+            'post', 'commenter__profile', 'parent_comment'
+        ).prefetch_related('mentioned_users').order_by('-created_at')
+        
+        # Filter by type if requested
+        comment_type = request.query_params.get('type')  # 'comments', 'replies', or 'all'
+        if comment_type == 'comments':
+            comments = comments.filter(parent_comment=None)
+        elif comment_type == 'replies':
+            comments = comments.filter(parent_comment__isnull=False)
         
         # Pagination
         page = int(request.query_params.get('page', 1))
@@ -2051,128 +2210,83 @@ class CollaborationNotificationsView(APIView):
         start_index = (page - 1) * page_size
         end_index = start_index + page_size
         
-        total_notifications = notifications.count()
-        unread_count = notifications.filter(is_read=False).count()
-        paginated_notifications = notifications[start_index:end_index]
+        total_comments = comments.count()
+        paginated_comments = comments[start_index:end_index]
         
-        serializer = NotificationSerializer(paginated_notifications, many=True)
+        # Enhanced serializer data
+        comments_data = []
+        for comment in paginated_comments:
+            comment_data = CommentSerializer(comment, context={'request': request}).data
+            comment_data['post_info'] = {
+                'id': str(comment.post.id),
+                'title': comment.post.title,
+                'creator': comment.post.creator.username
+            }
+            comments_data.append(comment_data)
         
         return Response({
-            'notifications': serializer.data,
+            'user': {
+                'id': str(target_user.id),
+                'username': target_user.username,
+                'is_current_user': target_user == request.user
+            },
+            'comments': comments_data,
+            'statistics': {
+                'total_comments': Comment.objects.filter(commenter=target_user, parent_comment=None).count(),
+                'total_replies': Comment.objects.filter(commenter=target_user, parent_comment__isnull=False).count(),
+                'total_mentions': target_user.mentions.count()
+            },
             'pagination': {
                 'page': page,
                 'page_size': page_size,
-                'total_pages': (total_notifications + page_size - 1) // page_size,
-                'total_notifications': total_notifications,
-                'unread_count': unread_count,
-                'has_next': end_index < total_notifications,
+                'total_pages': (total_comments + page_size - 1) // page_size,
+                'total_items': total_comments,
+                'has_next': end_index < total_comments,
                 'has_previous': page > 1
             }
         })
-    
-    def patch(self, request):
-        """Mark notifications as read"""
-        notification_ids = request.data.get('notification_ids', [])
-        
-        if notification_ids:
-            # Mark specific notifications as read
-            updated = Notification.objects.filter(
-                id__in=notification_ids,
-                user=request.user
-            ).update(is_read=True)
-            
-            return Response({
-                'message': f'{updated} notifications marked as read'
-            })
-        else:
-            # Mark all notifications as read
-            updated = Notification.objects.filter(
-                user=request.user,
-                is_read=False
-            ).update(is_read=True)
-            
-            return Response({
-                'message': f'All {updated} notifications marked as read'
-            })
 
-class MessageButtonView(APIView):
-    """Check connection status for message button functionality"""
+class CommentDetailView(APIView):
+    """Get detailed information about a specific comment"""
     permission_classes = [IsAuthenticated]
     
-    def get(self, request):
-        """Check if users are connected and get appropriate action"""
-        other_user_id = request.query_params.get('user_id')
-        
-        if not other_user_id:
-            return Response({
-                'error': 'user_id parameter is required'
-            }, status=status.HTTP_400_BAD_REQUEST)
-        
+    def get(self, request, comment_id):
+        """Get detailed comment information with context"""
         try:
-            other_user = User.objects.get(id=other_user_id)
-        except User.DoesNotExist:
+            comment = Comment.objects.select_related(
+                'commenter__profile', 'post', 'parent_comment__commenter'
+            ).prefetch_related('mentioned_users').get(id=comment_id)
+        except Comment.DoesNotExist:
             return Response({
-                'error': 'User not found'
+                'error': 'Comment not found'
             }, status=status.HTTP_404_NOT_FOUND)
         
-        # Check if connected
-        connection = Connection.objects.filter(
-            (Q(user1=request.user) & Q(user2=other_user)) |
-            (Q(user1=other_user) & Q(user2=request.user))
-        ).first()
+        # Serialize comment
+        comment_serializer = CommentSerializer(comment, context={'request': request})
         
-        if connection:
-            # Users are connected - get Telegram info
-            try:
-                other_profile = other_user.profile
-                telegram_username = other_profile.telegram_username
-                
-                if telegram_username:
-                    telegram_url = f"https://t.me/{telegram_username}"
-                    return Response({
-                        'status': 'connected',
-                        'action': 'open_telegram',
-                        'telegram_url': telegram_url,
-                        'telegram_username': telegram_username,
-                        'message': f'Message {other_user.username} on Telegram'
-                    })
-                else:
-                    return Response({
-                        'status': 'connected',
-                        'action': 'no_telegram',
-                        'message': f'{other_user.username} has not provided Telegram username'
-                    })
-            except:
-                return Response({
-                    'status': 'connected',
-                    'action': 'no_telegram',
-                    'message': f'{other_user.username} has not completed profile'
-                })
-        else:
-            # Check if there's a pending request
-            existing_request = ConnectionRequest.objects.filter(
-                Q(sender=request.user, receiver=other_user) |
-                Q(sender=other_user, receiver=request.user),
-                status='PENDING'
-            ).first()
-            
-            if existing_request:
-                if existing_request.sender == request.user:
-                    return Response({
-                        'status': 'request_sent',
-                        'action': 'wait',
-                        'message': 'Connection request already sent'
-                    })
-                else:
-                    return Response({
-                        'status': 'request_received',
-                        'action': 'respond',
-                        'message': 'You have a pending connection request from this user',
-                        'request_id': existing_request.id
-                    })
-            else:
-                return Response({
-                    'status': 'not_connected',
-                    'action': 'send_request',
-                    'message': f'Send connection request to {other_user.username}'
-                })
+        # Add additional context
+        response_data = comment_serializer.data
+        response_data['context'] = {
+            'post': {
+                'id': str(comment.post.id),
+                'title': comment.post.title,
+                'creator': comment.post.creator.username
+            },
+            'engagement': {
+                'reply_count': comment.replies.count(),
+                'mention_count': comment.mentioned_users.count(),
+                'can_reply': True,  # Could add permission logic here
+                'can_edit': comment.commenter == request.user,
+                'can_delete': comment.commenter == request.user or comment.post.creator == request.user
+            }
+        }
+        
+        # If this is a reply, add parent context
+        if comment.parent_comment:
+            response_data['context']['parent_comment'] = {
+                'id': str(comment.parent_comment.id),
+                'commenter': comment.parent_comment.commenter.username,
+                'content_preview': comment.parent_comment.content[:100] + '...' if len(comment.parent_comment.content) > 100 else comment.parent_comment.content
+            }
+        
+        return Response(response_data)

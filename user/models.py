@@ -225,6 +225,10 @@ class Comment(models.Model):
     commenter = models.ForeignKey(User, on_delete=models.CASCADE, related_name='comments')
     content = models.TextField(max_length=500)
     mentioned_users = models.ManyToManyField(User, blank=True, related_name='mentions')
+    
+    # Reply functionality
+    parent_comment = models.ForeignKey('self', on_delete=models.CASCADE, null=True, blank=True, related_name='replies')
+    
     created_at = models.DateTimeField(auto_now_add=True)
     updated_at = models.DateTimeField(auto_now=True)
     
@@ -232,7 +236,19 @@ class Comment(models.Model):
         ordering = ['created_at']
         
     def __str__(self):
+        if self.parent_comment:
+            return f"Reply by {self.commenter.username} to {self.parent_comment.commenter.username}"
         return f"Comment by {self.commenter.username} on {self.post.title}"
+    
+    @property
+    def is_reply(self):
+        """Check if this comment is a reply to another comment"""
+        return self.parent_comment is not None
+    
+    @property
+    def reply_count(self):
+        """Get total number of replies to this comment"""
+        return self.replies.count()
     
     def save(self, *args, **kwargs):
         """Extract mentioned users from content and create notifications"""
@@ -241,6 +257,7 @@ class Comment(models.Model):
         
         if is_new:
             # Extract mentions using regex
+            import re
             mentions = re.findall(r'@(\w+)', self.content)
             mentioned_users = User.objects.filter(username__in=mentions)
             
@@ -256,8 +273,21 @@ class Comment(models.Model):
                         title=f'{self.commenter.username} mentioned you',
                         message=f'{self.commenter.username} mentioned you in "{self.post.title}"',
                         related_post=self.post,
-                        related_comment=self
+                        related_comment=self,
+                        related_user=self.commenter
                     )
+            
+            # Create notification for reply (if this is a reply)
+            if self.parent_comment and self.parent_comment.commenter != self.commenter:
+                Notification.objects.create(
+                    user=self.parent_comment.commenter,
+                    type='COMMENT_REPLY',
+                    title=f'{self.commenter.username} replied to your comment',
+                    message=f'{self.commenter.username} replied to your comment on "{self.post.title}"',
+                    related_post=self.post,
+                    related_comment=self,
+                    related_user=self.commenter
+                )
 
 class Notification(models.Model):
     """Model for user notifications"""
@@ -266,6 +296,7 @@ class Notification(models.Model):
         ('CONNECTION_ACCEPTED', 'Connection Request Accepted'),
         ('CONNECTION_REQUEST', 'New Connection Request'),
         ('POST_COMMENT', 'New Comment on Post'),
+        ('COMMENT_REPLY', 'Reply to Comment'),
     ]
     
     id = models.UUIDField(primary_key=True, default=uuid.uuid4, editable=False)
