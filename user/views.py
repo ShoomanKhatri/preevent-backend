@@ -6,6 +6,9 @@ from rest_framework.views import APIView
 from rest_framework_simplejwt.tokens import RefreshToken
 from django.contrib.auth import authenticate
 from django.contrib.auth.models import User as DjangoUser
+from google.oauth2 import id_token
+from google.auth.transport import requests as google_requests
+from django.contrib.auth import get_user_model
 from django.db import IntegrityError
 from django.db.models import Q
 from .models import (
@@ -58,6 +61,42 @@ class AuthViewMixin(WalletAuthenticationMixin):
             'refresh': str(refresh),
             'access': str(refresh.access_token),
         }
+    
+User = get_user_model()
+
+class GoogleLoginView(APIView):
+    permission_classes = []  # AllowAny if you want public access
+
+    def post(self, request):
+        token = request.data.get('access_token')
+        if not token:
+            return Response({'error': 'No token provided'}, status=status.HTTP_400_BAD_REQUEST)
+
+        try:
+            idinfo = id_token.verify_oauth2_token(token, google_requests.Request())
+            email = idinfo['email']
+            name = idinfo.get('name', '')
+            picture = idinfo.get('picture', '')
+
+            user, created = User.objects.get_or_create(
+                username=email,
+                defaults={'email': email, 'first_name': name}
+            )
+
+            # Issue JWT
+            refresh = RefreshToken.for_user(user)
+            return Response({
+                'refresh': str(refresh),
+                'access': str(refresh.access_token),
+                'user': {
+                    'email': email,
+                    'name': name,
+                    'picture': picture,
+                }
+            })
+
+        except ValueError:
+            return Response({'error': 'Invalid token'}, status=status.HTTP_400_BAD_REQUEST)
 
 class MockWalletLoginView(AuthViewMixin, APIView):
     """Mock wallet login for testing purposes - bypasses signature verification"""
@@ -1725,15 +1764,18 @@ class NotificationsListView(APIView):
         # Add collaboration notifications
         for notif in notification_serializer.data:
             notifications.append({
-                'type': notif['type'].lower(),
+                'type': notif['type'],
                 'id': notif['id'],
                 'title': notif['title'],
                 'message': notif['message'],
                 'is_read': notif['is_read'],
                 'created_at': notif['created_at'],
-                'related_object_id': notif['related_object_id'],
-                'related_object_type': notif['related_object_type'],
+                 'related_post_id': notif.get('related_post_id'),
+                'related_comment_id': notif.get('related_comment_id'),
+                'related_connection_request_id': notif.get('related_connection_request_id'),
+                'related_user_id': notif.get('related_user_id'),
                 'data': notif
+                
             })
         
         # Sort by created_at (most recent first)

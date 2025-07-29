@@ -11,7 +11,7 @@ from .views import (
     NotificationsListView, MarkNotificationReadView, MarkAllNotificationsReadView,
     CollaborationPostsView, CollaborationPostDetailView, PostCommentsView,
     CommentRepliesView, CommentThreadView, CommentDetailView, TopLevelCommentsView,
-    UserCommentsView, ProfileView
+    UserCommentsView, ProfileView, GoogleLoginView
 )
 from .collaboration_views import (
     UserSearchView, CollaborationNotificationsView, MessageButtonView
@@ -20,6 +20,8 @@ from .collaboration_views import (
 urlpatterns = [
     # API Info
     path('', views.APIInfoView.as_view(), name='api_info'),
+
+     path('google-login/', GoogleLoginView.as_view(), name='google_login'),
     
     # Test authentication
     path('auth/test-login/', views.TestLoginView.as_view(), name='test_login'),

@@ -594,9 +594,8 @@ class NotificationSerializer(serializers.ModelSerializer):
     class Meta:
         model = Notification
         fields = [
-            'id', 'type', 'title', 'message', 'is_read', 
-            'related_object_id', 'related_object_type', 
-            'created_at'
+              'id', 'type', 'title', 'message', 'is_read', 'created_at',
+            'related_post_id', 'related_comment_id', 'related_connection_request_id', 'related_user_id'
         ]
 
 class UserSearchSerializer(serializers.ModelSerializer):
