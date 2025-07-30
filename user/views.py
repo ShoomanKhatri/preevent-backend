@@ -65,7 +65,8 @@ class AuthViewMixin(WalletAuthenticationMixin):
 User = get_user_model()
 
 class GoogleLoginView(APIView):
-    permission_classes = []  # AllowAny if you want public access
+    permission_classes = [AllowAny]  # Allow public access for login
+    authentication_classes = [ClerkJWTAuthentication]  # Use Clerk JWT verification
 
     def post(self, request):
         token = request.data.get('access_token')
@@ -73,30 +74,21 @@ class GoogleLoginView(APIView):
             return Response({'error': 'No token provided'}, status=status.HTTP_400_BAD_REQUEST)
 
         try:
-            idinfo = id_token.verify_oauth2_token(token, google_requests.Request())
-            email = idinfo['email']
-            name = idinfo.get('name', '')
-            picture = idinfo.get('picture', '')
-
-            user, created = User.objects.get_or_create(
-                username=email,
-                defaults={'email': email, 'first_name': name}
-            )
-
-            # Issue JWT
-            refresh = RefreshToken.for_user(user)
+            # Token is verified by ClerkJWTAuthentication
+            user = request.user  # User is set by ClerkJWTAuthentication
+            tokens = self.get_tokens_for_user(user)
             return Response({
-                'refresh': str(refresh),
-                'access': str(refresh.access_token),
+                'refresh': tokens['refresh'],
+                'access': tokens['access'],
                 'user': {
-                    'email': email,
-                    'name': name,
-                    'picture': picture,
-                }
+                    'email': user.email,
+                    'name': user.first_name,
+                    'username': user.username,
+                },
+                'requires_onboarding': not user.is_onboarded
             })
-
-        except ValueError:
-            return Response({'error': 'Invalid token'}, status=status.HTTP_400_BAD_REQUEST)
+        except Exception as e:
+            return Response({'error': f'Authentication failed: {str(e)}'}, status=status.HTTP_400_BAD_REQUEST)
 
 class MockWalletLoginView(AuthViewMixin, APIView):
     """Mock wallet login for testing purposes - bypasses signature verification"""
