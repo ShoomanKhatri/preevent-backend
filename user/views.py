@@ -13,7 +13,8 @@ from django.db import IntegrityError
 from django.db.models import Q
 from .models import (
     User, UserProfile, Vertical, ChainEcosystem, ConnectionRequest, Connection, 
-    SpamReport, UserSpamScore, CollaborationPost, Comment, Notification, Wallet  # <-- Add Wallet
+    SpamReport, UserSpamScore, CollaborationPost, Comment, Notification, Wallet, 
+    POSITIONS, VERTICALS, CHAIN_ECOSYSTEMS, CITIES, COMMUNITIES
 )
 from .serializers import (
     UserSerializer, OnboardingSerializer, UserProfileSerializer, 
@@ -50,26 +51,6 @@ def auth_response(request):
             "first_name": user.first_name,
         }
     })
-
-# Position choices
-POSITIONS = [
-    ('founder', 'Founder'),
-    ('co_founder', 'Co-Founder'),
-    ('ceo', 'CEO'),
-    ('cto', 'CTO'),
-    ('developer', 'Developer'),
-    ('designer', 'Designer'),
-    ('marketing', 'Marketing'),
-    ('business_development', 'Business Development'),
-    ('product_manager', 'Product Manager'),
-    ('engineer', 'Engineer'),
-    ('researcher', 'Researcher'),
-    ('consultant', 'Consultant'),
-    ('investor', 'Investor'),
-    ('advisor', 'Advisor'),
-    ('student', 'Student'),
-    ('other', 'Other')
-]
 
 class AuthViewMixin(WalletAuthenticationMixin):
     """Mixin for authentication views"""
@@ -662,34 +643,13 @@ class AttendeesView(APIView):
         })
     
     def _get_available_filters(self):
-        """Get available filter options based on current data"""
-        # Get unique positions
-        positions = UserProfile.objects.filter(
-            user__is_onboarded=True,
-            position__isnull=False
-        ).exclude(position='').values_list('position', flat=True).distinct()
-        
-        # Get unique cities
-        cities = UserProfile.objects.filter(
-            user__is_onboarded=True,
-            city__isnull=False
-        ).exclude(city='').values_list('city', flat=True).distinct()
-        
-        # Get unique verticals
-        verticals = Vertical.objects.filter(
-            userprofile__user__is_onboarded=True
-        ).values_list('name', flat=True).distinct()
-        
-        # Get unique chain ecosystems
-        chain_ecosystems = ChainEcosystem.objects.filter(
-            userprofile__user__is_onboarded=True
-        ).values_list('name', flat=True).distinct()
-        
+        """Return all static filter options for attendees"""
         return {
-            'positions': list(positions),
-            'cities': list(cities),
-            'verticals': list(verticals),
-            'chain_ecosystems': list(chain_ecosystems),
+            'positions': [p for p, _ in POSITIONS],
+            'verticals': [v for v, _ in VERTICALS],
+            'chain_ecosystems': [c for c, _ in CHAIN_ECOSYSTEMS],
+            'cities': [c for c, _ in CITIES],
+            'communities': [c for c, _ in COMMUNITIES],
         }
 
 class AttendeeDetailView(APIView):

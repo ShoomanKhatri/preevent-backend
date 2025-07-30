@@ -1,24 +1,28 @@
 services:
   web:
-    build: . # Builds your Django app from Dockerfile
+    build: . # Build Django app using Dockerfile
+    container_name: zefe_web
     command: python manage.py runserver 0.0.0.0:8000
     ports:
-      - "8000:8000" # Host:Container port mapping
+      - "8000:8000" # Access Django app via localhost:8000
     volumes:
-      - .:/app # Sync local code with container
+      - .:/app # Sync code for live reloading
     env_file:
-      - .env # Loads environment variables
+      - .env # Load environment variables
     depends_on:
-      - db # Waits for PostgreSQL container
+      - db # Ensure db starts before Django
 
   db:
     image: postgres:14
+    container_name: zefe_db
     environment:
       POSTGRES_DB: zefe_db
-      POSTGRES_USER: hyper_active
-      POSTGRES_PASSWORD: mypassword
+      POSTGRES_USER: postgres # Make sure this matches your .env
+      POSTGRES_PASSWORD: hyper_active
     volumes:
       - postgres_data:/var/lib/postgresql/data
+    ports:
+      - "5432:5432" # Optional, only needed if you want to connect from host
 
 volumes:
   postgres_data:

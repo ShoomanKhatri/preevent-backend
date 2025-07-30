@@ -14,32 +14,32 @@ class ClerkJWTAuthentication(BaseAuthentication):
     def authenticate(self, request):
         auth_header = request.headers.get("Authorization")
         if not auth_header or not auth_header.startswith("Bearer "):
-            print("DEBUG: Missing or invalid Authorization header")
+            # print("DEBUG: Missing or invalid Authorization header")
             return None
 
         token = auth_header.split(" ")[1]
-        print(f"DEBUG: Received JWT token: {token[:20]}...")
+        # print(f"DEBUG: Received JWT token: {token[:20]}...")
 
         try:
             jwks_resp = requests.get(CLERK_JWKS_URL)
             jwks_resp.raise_for_status()
             jwks = jwks_resp.json()
-            print(f"DEBUG: JWKS keys: {[k['kid'] for k in jwks.get('keys', [])]}")
+            # print(f"DEBUG: JWKS keys: {[k['kid'] for k in jwks.get('keys', [])]}")
         except Exception as e:
-            print(f"DEBUG: Failed to fetch JWKS: {e}")
+            # print(f"DEBUG: Failed to fetch JWKS: {e}")
             raise AuthenticationFailed(f"Failed to fetch JWKS: {e}")
 
         try:
             unverified_header = jwt.get_unverified_header(token)
             kid = unverified_header.get("kid")
-            print(f"DEBUG: JWT header: {unverified_header}")
+            # print(f"DEBUG: JWT header: {unverified_header}")
             if not kid:
                 raise AuthenticationFailed("JWT header missing 'kid' field")
             key = next((k for k in jwks["keys"] if k["kid"] == kid), None)
             if not key:
                 raise AuthenticationFailed(f"No matching public key for kid: {kid}")
         except Exception as e:
-            print(f"DEBUG: Error processing JWT header: {e}")
+            # print(f"DEBUG: Error processing JWT header: {e}")
             raise AuthenticationFailed(f"Error processing JWT header: {e}")
 
         try:
@@ -50,9 +50,9 @@ class ClerkJWTAuthentication(BaseAuthentication):
                 audience=CLERK_AUDIENCE,
                 issuer=CLERK_ISSUER,
             )
-            print(f"DEBUG: JWT payload: {payload}")
+            # print(f"DEBUG: JWT payload: {payload}")
         except Exception as e:
-            print(f"DEBUG: JWT decode error: {e}")
+            # print(f"DEBUG: JWT decode error: {e}")
             raise AuthenticationFailed(f"Invalid token: {e}")
 
         # Get or create Django user
@@ -64,7 +64,7 @@ class ClerkJWTAuthentication(BaseAuthentication):
         username = payload.get("sub")
         name = payload.get("first_name", "")
 
-        print(f"DEBUG: Creating/fetching user: username={username}, email={email}, name={name}")
+        # print(f"DEBUG: Creating/fetching user: username={username}, email={email}, name={name}")
 
         try:
             user, created = User.objects.get_or_create(

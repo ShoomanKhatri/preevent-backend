@@ -6,14 +6,20 @@ from django.utils import timezone
 import re
 from .models import (
     User, UserProfile, Vertical, ChainEcosystem, ConnectionRequest, Connection, 
-    SpamReport, UserSpamScore, CollaborationPost, Comment, Notification
+    SpamReport, UserSpamScore, CollaborationPost, Comment, Notification, Wallet
 )
 
+class WalletSerializer(serializers.ModelSerializer):
+    class Meta:
+        model = Wallet
+        fields = ['address', 'wallet_type']
+
 class UserSerializer(serializers.ModelSerializer):
+    wallets = WalletSerializer(many=True, read_only=True)  # Add this
+
     class Meta:
         model = User
-        fields = ['id', 'username', 'wallet_address', 'email', 'first_name', 'last_name', 'is_onboarded']
-        read_only_fields = ['id']
+        fields = ['id', 'username', 'email', 'first_name', 'last_name', 'is_onboarded', 'wallets']  # Remove 'wallet_address'
 
 class VerticalSerializer(serializers.ModelSerializer):
     class Meta:
@@ -203,18 +209,18 @@ class AttendeesSerializer(serializers.ModelSerializer):
     
     class Meta:
         model = User
-        fields = ['id', 'username', 'wallet_address', 'first_name', 'last_name', 'profile']
-        read_only_fields = ['id', 'username', 'wallet_address', 'first_name', 'last_name']
+        fields = ['id', 'username', 'first_name', 'last_name', 'profile', 'wallets']  # Remove 'wallet_address', add 'wallets'
+        read_only_fields = ['id', 'username', 'first_name', 'last_name']
 
 # Connection System Serializers
 class UserWithProfileSerializer(serializers.ModelSerializer):
     """Enhanced user serializer with profile information for connections"""
     profile = UserProfileSerializer(read_only=True)
+    wallets = WalletSerializer(many=True, read_only=True)
     
     class Meta:
         model = User
-        fields = ['id', 'username', 'wallet_address', 'email', 'first_name', 'last_name', 'is_onboarded', 'profile']
-        read_only_fields = ['id']
+        fields = ['id', 'username', 'email', 'first_name', 'last_name', 'is_onboarded', 'profile', 'wallets']  # Remove 'wallet_address'
 
 class ConnectionRequestSerializer(serializers.ModelSerializer):
     sender = UserWithProfileSerializer(read_only=True)
