@@ -17,7 +17,7 @@ services:
       - "8000"
     depends_on:
       - db
-      - nginx
+      # - nginx
 
   db:
     container_name: zefe_db
