@@ -1,5 +1,5 @@
 from rest_framework import status
-from rest_framework.decorators import api_view, permission_classes
+from rest_framework.decorators import api_view, permission_classes, authentication_classes
 from rest_framework.permissions import AllowAny, IsAuthenticated
 from rest_framework.response import Response
 from rest_framework.views import APIView
@@ -13,7 +13,7 @@ from django.db import IntegrityError
 from django.db.models import Q
 from .models import (
     User, UserProfile, Vertical, ChainEcosystem, ConnectionRequest, Connection, 
-    SpamReport, UserSpamScore, CollaborationPost, Comment, Notification
+    SpamReport, UserSpamScore, CollaborationPost, Comment, Notification, Wallet  # <-- Add Wallet
 )
 from .serializers import (
     UserSerializer, OnboardingSerializer, UserProfileSerializer, 
@@ -26,10 +26,30 @@ from .serializers import (
     CollaborationPostSerializer, CreateCollaborationPostSerializer, CommentSerializer,
     CreateCommentSerializer, NotificationSerializer, UserSearchSerializer
 )
+from .auth.clerk_auth import ClerkJWTAuthentication
 from .authentication import WalletAuthenticationMixin
 import uuid
 import time
 import secrets
+from rest_framework.decorators import api_view, authentication_classes, permission_classes
+from rest_framework.permissions import IsAuthenticated
+from rest_framework.response import Response
+from .auth.clerk_auth import ClerkJWTAuthentication
+
+@api_view(["GET"])
+@authentication_classes([ClerkJWTAuthentication])
+@permission_classes([IsAuthenticated])
+def auth_response(request):
+    user = request.user
+    return Response({
+        "message": "Login verified by backend",
+        "user": {
+            "id": str(user.id),
+            "username": user.username,
+            "email": user.email,
+            "first_name": user.first_name,
+        }
+    })
 
 # Position choices
 POSITIONS = [
@@ -102,38 +122,23 @@ class MockWalletLoginView(AuthViewMixin, APIView):
             wallet_address = serializer.validated_data['wallet_address']
             wallet_type = serializer.validated_data.get('wallet_type', 'solana')
             
-            # Try to get existing user by wallet address first
-            try:
-                user = User.objects.get(wallet_address=wallet_address)
+            # Find wallet, or create user and wallet
+            wallet = Wallet.objects.filter(address=wallet_address).first()
+            if wallet:
+                user = wallet.user
                 created = False
-            except User.DoesNotExist:
-                # Create new user with unique username
+            else:
+                # Create new user
+                random_suffix = secrets.token_hex(4)
+                username = f'wallet_{wallet_address[-8:]}_{random_suffix}'
+                user = User.objects.create(
+                    username=username,
+                    email=f'{wallet_address[-8:]}@wallet.zefe.com',
+                )
+                Wallet.objects.create(user=user, address=wallet_address, wallet_type=wallet_type)
                 created = True
-                max_attempts = 5
-                attempt = 0
-                
-                while attempt < max_attempts:
-                    try:
-                        # Generate unique username with random suffix
-                        random_suffix = secrets.token_hex(4)
-                        username = f'wallet_{wallet_address[-8:]}_{random_suffix}'
-                        
-                        user = User.objects.create(
-                            wallet_address=wallet_address,
-                            username=username,
-                            email=f'{wallet_address[-8:]}@wallet.zefe.com',
-                        )
-                        break
-                    except IntegrityError:
-                        attempt += 1
-                        if attempt >= max_attempts:
-                            return Response({
-                                'error': 'Unable to create user. Please try again.'
-                            }, status=status.HTTP_500_INTERNAL_SERVER_ERROR)
-            
-            # Generate tokens
+
             tokens = self.get_tokens_for_user(user)
-            
             return Response({
                 'message': 'Mock wallet authentication successful',
                 'tokens': tokens,
@@ -208,52 +213,33 @@ def request_nonce(request):
     if serializer.is_valid():
         wallet_address = serializer.validated_data['wallet_address']
         wallet_type = serializer.validated_data.get('wallet_type', 'solana')
-        
-        # Generate nonce
         auth_mixin = AuthViewMixin()
         nonce = auth_mixin.generate_nonce()
-        
-        # Try to get existing user by wallet address first
-        try:
-            user = User.objects.get(wallet_address=wallet_address)
+
+        wallet = Wallet.objects.filter(address=wallet_address).first()
+        if wallet:
+            user = wallet.user
             user.nonce = nonce
             user.save()
             created = False
-        except User.DoesNotExist:
-            # Create new user with unique username
+        else:
+            random_suffix = secrets.token_hex(4)
+            username = f'wallet_{wallet_address[-8:]}_{random_suffix}'
+            user = User.objects.create(
+                username=username,
+                email=f'{wallet_address[-8:]}@wallet.zefe.com',
+                nonce=nonce,
+            )
+            Wallet.objects.create(user=user, address=wallet_address, wallet_type=wallet_type)
             created = True
-            max_attempts = 5
-            attempt = 0
-            
-            while attempt < max_attempts:
-                try:
-                    # Generate unique username with random suffix
-                    random_suffix = secrets.token_hex(4)
-                    username = f'wallet_{wallet_address[-8:]}_{random_suffix}'
-                    
-                    user = User.objects.create(
-                        wallet_address=wallet_address,
-                        username=username,
-                        email=f'{wallet_address[-8:]}@wallet.zefe.com',
-                        nonce=nonce,
-                    )
-                    break
-                except IntegrityError:
-                    attempt += 1
-                    if attempt >= max_attempts:
-                        return Response({
-                            'error': 'Unable to create user. Please try again.'
-                        }, status=status.HTTP_500_INTERNAL_SERVER_ERROR)
-        
-        # Create sign message
+
         message = auth_mixin.create_sign_message(nonce, wallet_address)
-        
         return Response({
             'message': message,
             'nonce': nonce,
             'wallet_address': wallet_address,
             'wallet_type': wallet_type,
-            'expires_at': int(time.time()) + 300,  # 5 minutes from now
+            'expires_at': int(time.time()) + 300,
             'instructions': {
                 'step1': 'Copy the message above',
                 'step2': 'Sign it with your wallet',
@@ -261,117 +247,70 @@ def request_nonce(request):
                 'note': 'This nonce expires in 5 minutes'
             }
         })
-    
     return Response(serializer.errors, status=status.HTTP_400_BAD_REQUEST)
 
 @api_view(['POST'])
 @permission_classes([AllowAny])
 def wallet_login(request):
-    """Wallet login with signature verification"""
+    """WalletConnect login: associate wallet with user"""
     serializer = WalletLoginSerializer(data=request.data)
     if serializer.is_valid():
         wallet_address = serializer.validated_data['wallet_address']
-        signature = serializer.validated_data['signature']
-        message = serializer.validated_data['message']
-        
-        try:
-            user = User.objects.get(wallet_address=wallet_address)
-        except User.DoesNotExist:
-            return Response(
-                {'error': 'Wallet not found. Please request nonce first.'}, 
-                status=status.HTTP_404_NOT_FOUND
-            )
-        
-        # Verify signature (simplified for demo)
+        wallet_type = serializer.validated_data.get('wallet_type', 'solana')
+        signature = serializer.validated_data.get('signature')
+        message = serializer.validated_data.get('message')
+
+        # Find wallet by address
+        wallet = Wallet.objects.filter(address=wallet_address).first()
+        if not wallet:
+            return Response({'error': 'Wallet not found. Please request nonce first.'}, status=404)
+        user = wallet.user
+
+        # Verify signature (your logic here)
         auth_mixin = AuthViewMixin()
         if auth_mixin.verify_signature(message, signature, wallet_address):
-            # Clear nonce after successful verification
-            user.nonce = None
-            user.save()
-            
             # Generate tokens
             tokens = auth_mixin.get_tokens_for_user(user)
-            
             return Response({
                 'message': 'Wallet authentication successful',
                 'tokens': tokens,
                 'user': UserSerializer(user).data,
+                'wallet_info': {
+                    'wallet_address': wallet.address,
+                    'wallet_type': wallet.wallet_type,
+                },
                 'requires_onboarding': not user.is_onboarded
             })
         else:
-            return Response(
-                {'error': 'Invalid signature'}, 
-                status=status.HTTP_401_UNAUTHORIZED
-            )
-    
-    return Response(serializer.errors, status=status.HTTP_400_BAD_REQUEST)
+            return Response({'error': 'Invalid signature'}, status=401)
+    return Response(serializer.errors, status=400)
 
 class CurrentUserView(APIView):
     """Get current authenticated user data with profile"""
-    
     permission_classes = [IsAuthenticated]
-    
+
     def get(self, request):
-        """Get current user data with profile and completion stats"""
         user = request.user
-        
-        # Prepare user data
         user_data = UserSerializer(user).data
-        
-        # Check if user has a profile
         profile_data = None
         try:
             profile = user.profile
             profile_data = UserProfileSerializer(profile).data
         except UserProfile.DoesNotExist:
             profile_data = None
-        
-        # Calculate profile completion percentage
-        profile_completion = 0
-        if profile_data:
-            total_fields = 13  # Total important fields for profile completion
-            completed_fields = 0
-            
-            # Check which fields are completed
-            completion_fields = [
-                'full_name', 'bio', 'city', 'position', 'project_name',
-                'superteam_chapter', 'telegram_username', 'twitter_username',
-                'linkedin_url', 'email', 'avatar_url'
-            ]
-            
-            for field in completion_fields:
-                if profile_data.get(field):
-                    completed_fields += 1
-            
-            # Check verticals and chain_ecosystems
-            if profile_data.get('verticals'):
-                completed_fields += 1
-            if profile_data.get('chain_ecosystems'):
-                completed_fields += 1
-                
-            profile_completion = int((completed_fields / total_fields) * 100)
-        
+
+        # Get all wallets for the user
+        wallets = Wallet.objects.filter(user=user)
+        wallet_list = [{'address': w.address, 'type': w.wallet_type} for w in wallets]
+
         return Response({
             'user': user_data,
             'profile': profile_data,
+            'wallets': wallet_list,
             'authentication': {
                 'is_authenticated': True,
                 'requires_onboarding': not user.is_onboarded,
                 'has_profile': profile_data is not None,
-            },
-            'profile_completion': {
-                'percentage': profile_completion,
-                'is_complete': profile_completion >= 80,
-            },
-            'wallet_info': {
-                'has_wallet': bool(user.wallet_address),
-                'wallet_address': user.wallet_address,
-            },
-            'account_stats': {
-                'created_at': user.date_joined,
-                'last_login': user.last_login,
-                'is_active': user.is_active,
-                'is_staff': user.is_staff,
             }
         })
 
@@ -612,15 +551,14 @@ class ProtectedTestView(APIView):
     
     def get(self, request):
         """Test authenticated access"""
+        wallets = Wallet.objects.filter(user=request.user)
+        wallet_list = [{'address': w.address, 'type': w.wallet_type} for w in wallets]
         return Response({
             'message': 'This is a protected endpoint',
             'user': UserSerializer(request.user).data,
             'authenticated': True,
             'requires_onboarding': not request.user.is_onboarded,
-            'wallet_info': {
-                'has_wallet': bool(request.user.wallet_address),
-                'wallet_address': request.user.wallet_address,
-            }
+            'wallets': wallet_list,
         })
 
 class AttendeesView(APIView):
@@ -676,6 +614,7 @@ class AttendeesView(APIView):
         # Serialize the data
         attendees_data = []
         for profile in profiles:
+            wallets = Wallet.objects.filter(user=profile.user)
             attendee_data = {
                 'id': str(profile.user.id),
                 'full_name': profile.full_name,
@@ -693,7 +632,7 @@ class AttendeesView(APIView):
                     'linkedin_url': profile.linkedin_url,
                 },
                 'created_at': profile.created_at,
-                'wallet_address': profile.user.wallet_address[-8:] + '...' if profile.user.wallet_address else None,  # Masked for privacy
+                'wallets': [{'address': w.address, 'type': w.wallet_type} for w in wallets],
             }
             attendees_data.append(attendee_data)
         
@@ -764,13 +703,15 @@ class AttendeeDetailView(APIView):
             user = User.objects.get(id=user_id, is_onboarded=True)
             profile = user.profile
             
+            wallets = Wallet.objects.filter(user=user)
+            
             attendee_data = {
                 'id': str(user.id),
                 'user': {
                     'username': user.username,
                     'email': user.email,
                     'date_joined': user.date_joined,
-                    'wallet_address': user.wallet_address[-8:] + '...' if user.wallet_address else None,
+                    'wallets': [{'address': w.address, 'type': w.wallet_type} for w in wallets],
                 },
                 'profile': UserProfileSerializer(profile).data,
                 'social_links': {
@@ -1049,7 +990,7 @@ class ConnectionsView(APIView):
                 'connected_user': {
                     'id': other_user.id,
                     'username': other_user.username,
-                    'wallet_address': other_user.wallet_address,
+                    'wallets': [{'address': w.address, 'type': w.wallet_type} for w in Wallet.objects.filter(user=other_user)],
                     'full_name': other_profile.full_name if other_profile else '',
                     'bio': other_profile.bio if other_profile else '',
                     'city': other_profile.city if other_profile else '',
@@ -1465,7 +1406,7 @@ class MyConnectionsView(APIView):
                 'connected_user': {
                     'id': str(other_user.id),
                     'username': other_user.username,
-                    'wallet_address': other_user.wallet_address[-8:] + '...' if other_user.wallet_address else None,
+                    'wallets': [{'address': w.address, 'type': w.wallet_type} for w in Wallet.objects.filter(user=other_user)],
                     'full_name': other_profile.full_name if other_profile else '',
                     'bio': other_profile.bio if other_profile else '',
                     'city': other_profile.city if other_profile else '',
@@ -2278,6 +2219,7 @@ class UserCommentsView(APIView):
                 'has_next': end_index < total_comments,
                 'has_previous': page > 1
             }
+
         })
 
 class CommentDetailView(APIView):
@@ -2324,3 +2266,4 @@ class CommentDetailView(APIView):
             }
         
         return Response(response_data)
+

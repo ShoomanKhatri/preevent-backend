@@ -32,12 +32,23 @@ CHAIN_ECOSYSTEMS = [
 class User(AbstractUser):
     """Custom User model with wallet authentication"""
     id = models.UUIDField(primary_key=True, default=uuid.uuid4, editable=False)
-    wallet_address = models.CharField(max_length=100, unique=True, null=True, blank=True)
     nonce = models.CharField(max_length=100, null=True, blank=True)
-    is_onboarded = models.BooleanField(default=False)  # Track if user completed onboarding
-    
+    is_onboarded = models.BooleanField(default=False)
+    email = models.EmailField(null=True, blank=True)
+
     def __str__(self):
-        return self.username or self.wallet_address or str(self.id)
+        return self.username or str(self.id)
+
+class Wallet(models.Model):
+    """Model for user wallets (supports multiple wallets per user)"""
+    id = models.UUIDField(primary_key=True, default=uuid.uuid4, editable=False)
+    user = models.ForeignKey(User, on_delete=models.CASCADE, related_name='wallets')
+    address = models.CharField(max_length=100, unique=True)
+    wallet_type = models.CharField(max_length=50, blank=True)  # e.g., 'solana', 'ethereum'
+    created_at = models.DateTimeField(auto_now_add=True)
+
+    def __str__(self):
+        return f"{self.address} ({self.wallet_type})"
 
 class ChainEcosystem(models.Model):
     """Model for blockchain ecosystems"""
@@ -82,7 +93,7 @@ class UserProfile(models.Model):
     updated_at = models.DateTimeField(auto_now=True)
 
     def __str__(self):
-        return f"{self.full_name or self.user.username} ({self.user.wallet_address or self.user.username})"
+        return f"{self.full_name or self.user.username} ({self.user.username})"
 
 class Vertical(models.Model):
     """Model for project verticals"""
