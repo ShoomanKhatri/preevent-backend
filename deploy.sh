@@ -6,6 +6,9 @@ set -e
 echo "🔄 Pulling latest code from main branch..."
 git pull origin main
 
+echo "🐳 Stopping old containers..."
+docker compose down
+
 echo "🐳 Rebuilding Docker containers..."
 docker compose build
 
