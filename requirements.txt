@@ -9,6 +9,7 @@ Django==5.2.4
 django-cors-headers==4.7.0
 djangorestframework==3.16.0
 djangorestframework_simplejwt==5.5.0
+ecdsa==0.19.1
 google-auth==2.40.3
 google-auth-oauthlib==1.2.2
 gunicorn==22.0.0
@@ -23,9 +24,11 @@ pycparser==2.22
 PyJWT==2.9.0
 python-decouple==3.8
 python-dotenv==1.1.1
+python-jose==3.5.0
 requests==2.32.4
 requests-oauthlib==2.0.0
 rsa==4.9.1
+six==1.17.0
 sqlparse==0.5.3
 typing_extensions==4.14.1
 tzdata==2025.2
