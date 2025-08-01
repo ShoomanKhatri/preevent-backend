@@ -26,7 +26,7 @@ services:
     ports:
       - "5432:5432" # Optional, only needed if you want to connect from host
 
-   nginx:
+  nginx:
     image: nginx:latest
     container_name: zefe_nginx
     ports:
