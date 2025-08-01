@@ -26,5 +26,15 @@ services:
     ports:
       - "5432:5432" # Optional, only needed if you want to connect from host
 
+   nginx:
+    image: nginx:latest
+    container_name: zefe_nginx
+    ports:
+      - "80:80"
+    volumes:
+      - ./nginx/default.conf:/etc/nginx/conf.d/default.conf
+    depends_on:
+      - web
+
 volumes:
   postgres_data:

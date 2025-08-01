@@ -31,7 +31,7 @@ SECRET_KEY = 'django-insecure-h@&q^4es28e#t-i@q%qw1whii-))v1g38^!$2r-!l_kit09l26
 # SECURITY WARNING: don't run with debug turned on in production!
 DEBUG = True
 
-ALLOWED_HOSTS = []
+ALLOWED_HOSTS = ['api.zefe.xyz','localhost', '127.0.0.1']
 
 
 # Application definition
