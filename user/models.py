@@ -283,7 +283,7 @@ class UserProfile(models.Model):
     # Social Links
     telegram_username = models.CharField(max_length=100, blank=True)
     twitter_username = models.CharField(max_length=100, blank=True)
-    linkedin_url = models.URLField(blank=True)
+    linkedin_url = models.CharField(max_length=100, blank=True)
     
     # Profile Image
     avatar_url = models.URLField(blank=True)  # For external image URLs
