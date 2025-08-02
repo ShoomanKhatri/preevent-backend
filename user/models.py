@@ -284,7 +284,6 @@ class UserProfile(models.Model):
     telegram_username = models.CharField(max_length=100, blank=True)
     twitter_username = models.CharField(max_length=100, blank=True)
     linkedin_url = models.URLField(blank=True)
-    email = models.EmailField(blank=True)
     
     # Profile Image
     avatar_url = models.URLField(blank=True)  # For external image URLs

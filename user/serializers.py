@@ -41,7 +41,7 @@ class UserProfileSerializer(serializers.ModelSerializer):
         fields = [
             'user', 'full_name', 'bio', 'city', 'position', 'project_name', 
             'superteam_chapter', 'verticals', 'chain_ecosystems', 'telegram_username',
-            'twitter_username', 'linkedin_url', 'email', 'avatar_url', 'image',
+            'twitter_username', 'linkedin_url', 'avatar_url', 'image',
             'wants_updates', 'created_at', 'updated_at'
         ]
 
@@ -49,16 +49,15 @@ class OnboardingSerializer(serializers.ModelSerializer):
     """Serializer for user onboarding"""
     verticals = serializers.ListField(
         child=serializers.CharField(max_length=50),
-        write_only=True,
         required=False,
         allow_empty=True
     )
     chain_ecosystems = serializers.ListField(
         child=serializers.CharField(max_length=50),
-        write_only=True,
         required=False,
         allow_empty=True
     )
+    email = serializers.EmailField(required=False)  # Keep this to handle email updates
     wallet_address = serializers.CharField(max_length=100, required=False)
     wants_updates = serializers.BooleanField(default=False, required=False)
     
@@ -74,34 +73,33 @@ class OnboardingSerializer(serializers.ModelSerializer):
     def create(self, validated_data):
         user = self.context['request'].user
         
-        # Extract many-to-many data
+        # Extract data that doesn't belong to UserProfile
         verticals_data = validated_data.pop('verticals', [])
         chain_ecosystems_data = validated_data.pop('chain_ecosystems', [])
         wallet_address = validated_data.pop('wallet_address', None)
+        email = validated_data.pop('email', None)  # Extract email
         
-        # Handle wallet address update
+        # Update user email if provided
+        if email and email != user.email:
+            user.email = email
+            user.save()
+        
+        # Handle wallet address update (create Wallet object instead)
         if wallet_address:
-            # Only update if it's different from the current wallet address
-            if wallet_address != user.wallet_address:
-                # Check if another user (not the current user) has this wallet address
-                existing_user = User.objects.filter(wallet_address=wallet_address).exclude(id=user.id).first()
-                if existing_user:
-                    raise serializers.ValidationError({
-                        'wallet_address': 'This wallet address is already associated with another user.'
-                    })
-                
-                try:
-                    user.wallet_address = wallet_address
-                    user.save()
-                except IntegrityError:
-                    raise serializers.ValidationError({
-                        'wallet_address': 'This wallet address is already in use.'
-                    })
+            # Check if wallet already exists
+            existing_wallet = Wallet.objects.filter(address=wallet_address).first()
+            if existing_wallet and existing_wallet.user != user:
+                raise serializers.ValidationError({
+                    'wallet_address': 'This wallet address is already associated with another user.'
+                })
+            elif not existing_wallet:
+                # Create new wallet for user
+                Wallet.objects.create(user=user, address=wallet_address, wallet_type='solana')
         
-        # Create or update profile
+        # Create or update profile (email field removed from UserProfile)
         profile, created = UserProfile.objects.get_or_create(user=user)
         
-        # Update profile fields
+        # Update profile fields (email is no longer in validated_data)
         for field, value in validated_data.items():
             setattr(profile, field, value)
         

@@ -607,6 +607,7 @@ class AttendeesView(APIView):
                 'verticals': [v.name for v in profile.verticals.all()],
                 'chain_ecosystems': [c.name for c in profile.chain_ecosystems.all()],
                 'avatar_url': profile.avatar_url,
+                'email':profile.user.email,
                 'social_links': {
                     'telegram_username': profile.telegram_username,
                     'twitter_username': profile.twitter_username,
