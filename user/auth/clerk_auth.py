@@ -4,9 +4,17 @@ from rest_framework.authentication import BaseAuthentication
 from rest_framework.exceptions import AuthenticationFailed
 from django.contrib.auth import get_user_model
 
-CLERK_JWKS_URL = "https://ample-lionfish-11.clerk.accounts.dev/.well-known/jwks.json"
-CLERK_ISSUER = "https://ample-lionfish-11.clerk.accounts.dev"
+
+  #my suman khatri clerk
+# CLERK_JWKS_URL = "https://ample-lionfish-11.clerk.accounts.dev/.well-known/jwks.json"
+# CLERK_ISSUER = "https://ample-lionfish-11.clerk.accounts.dev"
+# CLERK_AUDIENCE = "http://localhost:8081"
+
+# Bibek Bhandari clerk
+CLERK_JWKS_URL = "https://awaited-feline-51.clerk.accounts.dev/.well-known/jwks.json"
+CLERK_ISSUER = "https://awaited-feline-51.clerk.accounts.dev/"
 CLERK_AUDIENCE = "http://localhost:8081"
+
 
 User = get_user_model()
 
