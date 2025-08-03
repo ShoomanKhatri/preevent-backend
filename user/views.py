@@ -1190,6 +1190,14 @@ class RespondToConnectionRequestView(APIView):
                         }
                     }, status=status.HTTP_400_BAD_REQUEST)
                 
+                # Remove the connection request notification for the receiver
+                # since they have now responded to it
+                Notification.objects.filter(
+                    user=connection_request.receiver,
+                    type='CONNECTION_REQUEST',
+                    related_connection_request=connection_request
+                ).delete()
+                
                 if response == 'interested':
                     # Create connection
                     Connection.objects.create(
