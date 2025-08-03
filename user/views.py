@@ -1643,17 +1643,6 @@ class NotificationsListView(APIView):
         
         notifications = []
         
-        # Add connection requests to notifications
-        for req in request_serializer.data:
-            notifications.append({
-                'type': 'connection_request',
-                'id': req['id'],
-                'title': 'New Connection Request',
-                'message': f"{req['sender']['username']} wants to connect with you",
-                'note_content': req.get('note_content', ''),
-                'created_at': req['created_at'],
-                'data': req
-            })
         
         # Add collaboration notifications
         for notif in notification_serializer.data:
@@ -1661,7 +1650,6 @@ class NotificationsListView(APIView):
                 'type': notif['type'],
                 'id': notif['id'],
                 'title': notif['title'],
-                'message': notif['message'],
                 'is_read': notif['is_read'],
                 'created_at': notif['created_at'],
                  'related_post_id': notif.get('related_post_id'),
