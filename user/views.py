@@ -347,7 +347,8 @@ class OnboardingView(APIView):
                     'user': UserSerializer(user).data,
                     'profile': UserProfileSerializer(profile).data,
                     'requires_onboarding': False,
-                    'onboarding_complete': True
+                    'onboarding_complete': True,
+                    'is_onboarding_completed': profile.is_onboarding_completed
                 })
             
             return Response(serializer.errors, status=status.HTTP_400_BAD_REQUEST)
@@ -388,7 +389,8 @@ class OnboardingUpdateView(APIView):
                 'user': UserSerializer(user).data,
                 'profile': UserProfileSerializer(profile).data,
                 'requires_onboarding': False,
-                'profile_updated': True
+                'profile_updated': True,
+                'is_onboarding_completed': profile.is_onboarding_completed
             })
         
         return Response(serializer.errors, status=status.HTTP_400_BAD_REQUEST)

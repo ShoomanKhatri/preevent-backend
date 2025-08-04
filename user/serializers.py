@@ -129,29 +129,38 @@ class OnboardingSerializer(serializers.ModelSerializer):
     def update(self, instance, validated_data):
         user = instance.user
         
-        # Extract many-to-many data
+        # Extract many-to-many data and other special fields
         verticals_data = validated_data.pop('verticals', None)
         chain_ecosystems_data = validated_data.pop('chain_ecosystems', None)
         wallet_address = validated_data.pop('wallet_address', None)
+        email = validated_data.pop('email', None)
+        
+        # Handle email update
+        if email and email != user.email:
+            # Check if another user has this email
+            existing_user = User.objects.filter(email=email).exclude(id=user.id).first()
+            if existing_user:
+                raise serializers.ValidationError({
+                    'email': 'This email is already associated with another user.'
+                })
+            user.email = email
+            user.save()
         
         # Handle wallet address update
         if wallet_address:
-            # Only update if it's different from the current wallet address
-            if wallet_address != user.wallet_address:
-                # Check if another user (not the current user) has this wallet address
-                existing_user = User.objects.filter(wallet_address=wallet_address).exclude(id=user.id).first()
-                if existing_user:
-                    raise serializers.ValidationError({
-                        'wallet_address': 'This wallet address is already associated with another user.'
-                    })
-                
-                try:
-                    user.wallet_address = wallet_address
-                    user.save()
-                except IntegrityError:
-                    raise serializers.ValidationError({
-                        'wallet_address': 'This wallet address is already in use.'
-                    })
+            # Check if this wallet address already exists for another user
+            existing_wallet = Wallet.objects.filter(address=wallet_address).exclude(user=user).first()
+            if existing_wallet:
+                raise serializers.ValidationError({
+                    'wallet_address': 'This wallet address is already associated with another user.'
+                })
+            
+            # Get or create wallet for this user
+            wallet, created = Wallet.objects.get_or_create(
+                user=user,
+                address=wallet_address,
+                defaults={'wallet_type': 'solana'}
+            )
         
         # Update profile fields
         for field, value in validated_data.items():
