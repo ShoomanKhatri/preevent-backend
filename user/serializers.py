@@ -35,6 +35,7 @@ class UserProfileSerializer(serializers.ModelSerializer):
     user = UserSerializer(read_only=True)
     verticals = VerticalSerializer(many=True, read_only=True)
     chain_ecosystems = ChainEcosystemSerializer(many=True, read_only=True)
+    is_onboarding_completed = serializers.ReadOnlyField()
     
     class Meta:
         model = UserProfile
@@ -42,7 +43,7 @@ class UserProfileSerializer(serializers.ModelSerializer):
             'user', 'full_name', 'bio', 'city', 'position', 'project_name', 
             'superteam_chapter', 'verticals', 'chain_ecosystems', 'telegram_username',
             'twitter_username', 'linkedin_url', 'avatar_url', 'image',
-            'wants_updates', 'created_at', 'updated_at'
+            'wants_updates', 'created_at', 'updated_at', 'is_onboarding_completed'
         ]
 
 class OnboardingSerializer(serializers.ModelSerializer):

@@ -274,11 +274,15 @@ class CurrentUserView(APIView):
         user = request.user
         user_data = UserSerializer(user).data
         profile_data = None
+        is_onboarding_completed = False
+        
         try:
             profile = user.profile
             profile_data = UserProfileSerializer(profile).data
+            is_onboarding_completed = profile.is_onboarding_completed
         except UserProfile.DoesNotExist:
             profile_data = None
+            is_onboarding_completed = False
 
         # Get all wallets for the user
         wallets = Wallet.objects.filter(user=user)
@@ -292,6 +296,7 @@ class CurrentUserView(APIView):
                 'is_authenticated': True,
                 'requires_onboarding': not user.is_onboarded,
                 'has_profile': profile_data is not None,
+                'is_onboarding_completed': is_onboarding_completed,
             }
         })
 
@@ -644,13 +649,13 @@ class AttendeesView(APIView):
         })
     
     def _get_available_filters(self):
-        """Return all static filter options for attendees"""
+        """Return all static filter options for attendees with display names"""
         return {
-            'positions': [p for p, _ in POSITIONS],
-            'verticals': [v for v, _ in VERTICALS],
-            'chain_ecosystems': [c for c, _ in CHAIN_ECOSYSTEMS],
-            'cities': [c for c, _ in CITIES],
-            'communities': [c for c, _ in COMMUNITIES],
+            'positions': [display for _, display in POSITIONS],
+            'verticals': [display for _, display in VERTICALS], 
+            'chain_ecosystems': [display for _, display in CHAIN_ECOSYSTEMS],
+            'cities': [display for _, display in CITIES],
+            'communities': [display for _, display in COMMUNITIES],
         }
 
 class AttendeeDetailView(APIView):
@@ -1428,7 +1433,7 @@ class MyConnectionsView(APIView):
         }, status=status.HTTP_200_OK)
     
     def _get_available_filters(self, request):
-        """Get available filter options based on connected users"""
+        """Get available filter options based on connected users with display names"""
         user = request.user
         
         connections = Connection.objects.filter(
@@ -1462,10 +1467,10 @@ class MyConnectionsView(APIView):
                 continue
         
         return {
-            'positions': sorted(list(positions)),
-            'cities': sorted(list(cities)),
-            'verticals': sorted(list(verticals)),
-            'chain_ecosystems': sorted(list(chain_ecosystems)),
+            'positions': sorted(convert_choices_to_display_names(list(positions), POSITIONS)),
+            'cities': sorted(convert_choices_to_display_names(list(cities), CITIES)),
+            'verticals': sorted(convert_choices_to_display_names(list(verticals), VERTICALS)),
+            'chain_ecosystems': sorted(convert_choices_to_display_names(list(chain_ecosystems), CHAIN_ECOSYSTEMS)),
         }
 
 class ReportSpamView(APIView):

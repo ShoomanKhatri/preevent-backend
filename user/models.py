@@ -296,6 +296,28 @@ class UserProfile(models.Model):
     created_at = models.DateTimeField(auto_now_add=True)
     updated_at = models.DateTimeField(auto_now=True)
 
+    @property
+    def is_onboarding_completed(self):
+        """Check if all required onboarding fields are filled"""
+        required_fields = [
+            self.full_name,
+            self.position,
+            self.city,
+            self.project_name,
+            self.telegram_username,
+        ]
+        
+        # Check if all required fields have values
+        basic_fields_filled = all(field.strip() if field else False for field in required_fields)
+        
+        # Check if at least one vertical is selected
+        has_verticals = self.verticals.exists()
+        
+        # Check if at least one chain ecosystem is selected
+        has_chain_ecosystems = self.chain_ecosystems.exists()
+        
+        return basic_fields_filled and has_verticals and has_chain_ecosystems
+
     def __str__(self):
         return f"{self.full_name or self.user.username} ({self.user.username})"
 
