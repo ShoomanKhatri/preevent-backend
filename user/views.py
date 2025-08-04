@@ -1634,42 +1634,90 @@ class NotificationsListView(APIView):
         """Get detailed notifications list"""
         user = request.user
         
-        # Get pending connection requests
-        pending_requests = ConnectionRequest.objects.filter(
-            receiver=user,
-            status='PENDING'
-        ).order_by('-created_at')
-        
-        # Get collaboration notifications
+        # Get collaboration notifications with related objects
         collaboration_notifications = Notification.objects.filter(
             user=user
+        ).select_related(
+            'related_user',
+            'related_user__profile',
+            'related_connection_request',
+            'related_post',
+            'related_comment'
         ).order_by('-created_at')
-        
-        # Serialize the requests
-        request_serializer = ConnectionRequestSerializer(pending_requests, many=True)
-        notification_serializer = NotificationSerializer(collaboration_notifications, many=True)
         
         notifications = []
         
-        
-        # Add collaboration notifications
-        for notif in notification_serializer.data:
-            notifications.append({
-                'type': notif['type'],
-                'id': notif['id'],
-                'title': notif['title'],
-                'is_read': notif['is_read'],
-                'created_at': notif['created_at'],
-                 'related_post_id': notif.get('related_post_id'),
-                'related_comment_id': notif.get('related_comment_id'),
-                'related_connection_request_id': notif.get('related_connection_request_id'),
-                'related_user_id': notif.get('related_user_id'),
-                'data': notif
+        # Process each notification and add enhanced data
+        for notif in collaboration_notifications:
+            notification_data = {
+                'type': notif.type,
+                'id': str(notif.id),
+                'title': notif.title,
+                'is_read': notif.is_read,
+                'created_at': notif.created_at,
+                'related_post_id': str(notif.related_post.id) if notif.related_post else None,
+                'related_comment_id': str(notif.related_comment.id) if notif.related_comment else None,
+                'related_connection_request_id': str(notif.related_connection_request.id) if notif.related_connection_request else None,
+                'related_user_id': str(notif.related_user.id) if notif.related_user else None,
+            }
+            
+            # Add enhanced data based on notification type
+            if notif.type == 'CONNECTION_REQUEST' and notif.related_connection_request:
+                connection_request = notif.related_connection_request
+                sender_profile = None
+                try:
+                    sender_profile = connection_request.sender.profile
+                except:
+                    pass
                 
-            })
-        
-        # Sort by created_at (most recent first)
-        notifications.sort(key=lambda x: x['created_at'], reverse=True)
+                notification_data.update({
+                    'note_content': connection_request.note_content,
+                    'status': connection_request.status,
+                    'full_name': sender_profile.full_name if sender_profile else connection_request.sender.username,
+                    'sender_username': connection_request.sender.username,
+                })
+            
+            elif notif.type == 'CONNECTION_ACCEPTED' and notif.related_connection_request:
+                connection_request = notif.related_connection_request
+                user_profile = None
+                try:
+                    user_profile = notif.related_user.profile
+                except:
+                    pass
+                
+                notification_data.update({
+                    'status': connection_request.status,
+                    'full_name': user_profile.full_name if user_profile else notif.related_user.username,
+                    'username': notif.related_user.username,
+                })
+            
+            elif notif.related_user:
+                # For other notification types, include basic user info
+                user_profile = None
+                try:
+                    user_profile = notif.related_user.profile
+                except:
+                    pass
+                
+                notification_data.update({
+                    'full_name': user_profile.full_name if user_profile else notif.related_user.username,
+                    'username': notif.related_user.username,
+                })
+            
+            # Add the complete notification data
+            notification_data['data'] = {
+                'id': str(notif.id),
+                'type': notif.type,
+                'title': notif.title,
+                'is_read': notif.is_read,
+                'created_at': notif.created_at,
+                'related_post_id': str(notif.related_post.id) if notif.related_post else None,
+                'related_comment_id': str(notif.related_comment.id) if notif.related_comment else None,
+                'related_connection_request_id': str(notif.related_connection_request.id) if notif.related_connection_request else None,
+                'related_user_id': str(notif.related_user.id) if notif.related_user else None,
+            }
+            
+            notifications.append(notification_data)
         
         return Response({
             'count': len(notifications),
