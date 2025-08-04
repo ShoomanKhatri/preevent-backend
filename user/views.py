@@ -1136,7 +1136,7 @@ class SendConnectionRequestView(APIView):
                     user=receiver,
                     type='CONNECTION_REQUEST',
                     title='New connection request',
-                    message=f'{sender.username} sent you a connection request',
+                    # message=f'{sender.username} sent you a connection request',
                     related_connection_request=connection_request,
                     related_user=sender
                 )
@@ -1213,7 +1213,7 @@ class RespondToConnectionRequestView(APIView):
                         user=connection_request.sender,
                         type='CONNECTION_ACCEPTED',
                         title='Connection request accepted',
-                        message=f'{connection_request.receiver.username} accepted your connection request',
+                        # message=f'{connection_request.receiver.username} accepted your connection request',
                         related_connection_request=connection_request,
                         related_user=connection_request.receiver
                     )
@@ -1962,7 +1962,7 @@ class PostCommentsView(APIView):
                         user=post.creator,
                         type='POST_COMMENT',
                         title=f'{request.user.username} commented on your post',
-                        message=f'{request.user.username} commented on "{post.title}"',
+                        # message=f'{request.user.username} commented on "{post.title}"',
                         related_post=post,
                         related_comment=comment,
                         related_user=request.user
