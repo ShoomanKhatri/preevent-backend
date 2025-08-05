@@ -37,6 +37,18 @@ from rest_framework.permissions import IsAuthenticated
 from rest_framework.response import Response
 from .auth.clerk_auth import ClerkJWTAuthentication
 
+def get_display_name_from_choices(value, choices):
+    """Get display name from choices tuple"""
+    for choice_value, display_name in choices:
+        if choice_value == value:
+            return display_name
+    return value  # Return original value if not found
+
+def convert_choices_to_display_names(values, choices):
+    """Convert a list of choice values to their display names"""
+    return [get_display_name_from_choices(value, choices) for value in values]
+
+
 @api_view(["GET"])
 @authentication_classes([ClerkJWTAuthentication])
 @permission_classes([IsAuthenticated])
